@@ -591,23 +591,25 @@ export function createInitialWorld({ seed, mapSize, mapData, totalPlayers = 12, 
     const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
   }
 
-  const npcs = {};
-  for (let i = 1; i <= npcCount; i++){
-    const id = `npc_${i}`;
-    npcs[id] = {
-      id,
-      name: generateTributeName(district, rng),
-      district: pool[i-1] ?? rng.int(1,12),
-      areaId: 1,
-      hp: 100,
-      fp: 70,
-      kills: 0,
-      attrs: randomAttrs7(rng),
-      status: [],
-      inventory: {},
-      memory: { goal: "survive" }
-    };
-  }
+    const npcs = {};
+for (let i = 1; i <= npcCount; i++){
+  const id = `npc_${i}`;
+  const district = pool[i-1] ?? rng.int(1,12);
+
+  npcs[id] = {
+    id,
+    name: generateTributeName(district, rng),
+    district,
+    areaId: 1,
+    hp: 100,
+    fp: 70,
+    kills: 0,
+    attrs: randomAttrs7(rng),
+    status: [],
+    inventory: {},
+    memory: { goal: "survive" }
+  };
+}
 
   const world = {
     meta: {
@@ -617,7 +619,7 @@ export function createInitialWorld({ seed, mapSize, mapData, totalPlayers = 12, 
       mapSize,
       totalPlayers: total
     },
-    map: mapData.map,
+    map: mapData,
     entities: {
       player: {
         id: "player",

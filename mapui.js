@@ -105,7 +105,7 @@ export class MapUI {
   setData({ world, paletteIndex=0 }){
     this.world = world;
     this.paletteIndex = paletteIndex;
-    this.geom = world.map.uiGeom;
+    this.geom = world?.map?.uiGeom || null;
     this.render();
   }
 

@@ -363,16 +363,16 @@ function finalizeDay(){
 
     // Debug: list all tributes with HP/FP/Area
     const all = [];
-    all.push({ id: \"player\", name: \"You\", district: p.district, hp: p.hp, fp: p.fp, areaId: p.areaId });
+    all.push({ id: "player", name: "You", district: p.district, hp: p.hp, fp: p.fp, areaId: p.areaId });
     for(const npc of Object.values(world.entities.npcs)){
       all.push({ id: npc.id, name: npc.name, district: npc.district, hp: npc.hp, fp: npc.fp, areaId: npc.areaId });
     }
     debugTributes.innerHTML = all.map(t => `
-      <div class=\"pill\" style=\"justify-content:space-between; gap:10px;\">
-        <span><strong>${escapeHtml(t.name)}</strong> <span class=\"muted small\">${escapeHtml(districtTag(t.district))}</span></span>
-        <span class=\"muted small\" style=\"font-family:var(--mono);\">HP ${t.hp} • FP ${t.fp} • A${t.areaId}</span>
+      <div class="pill" style="justify-content:space-between; gap:10px;">
+        <span><strong>${escapeHtml(t.name)}</strong> <span class="muted small">${escapeHtml(districtTag(t.district))}</span></span>
+        <span class="muted small" style="font-family:var(--mono);">HP ${t.hp} • FP ${t.fp} • A${t.areaId}</span>
       </div>
-    `).join(\"\");
+    `).join("");
 
     mapUI.setData({ world, paletteIndex: 0 });
     mapUI.render();
