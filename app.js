@@ -271,7 +271,7 @@ function renderGame(){
       ? occ.map(o => `<div class="pill"><strong>${escapeHtml(o.name)}</strong><span>${escapeHtml(districtTag(o.district))}</span></div>`).join("")
       : `<div class="muted small">${reveal ? "No one here" : "Unknown"}</div>`;
 
-    mapUI.setWorld(world);
+    mapUI.setData({ world, paletteIndex: 0 });
     mapUI.render();
   }
 
@@ -312,7 +312,7 @@ function renderGame(){
   };
 
   // Initial paint
-  mapUI.setWorld(world);
+  mapUI.setData({ world, paletteIndex: 0 });
   sync();
 
   function openDayModal(){
