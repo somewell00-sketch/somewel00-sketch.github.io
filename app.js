@@ -5,6 +5,8 @@ import { advanceDay, maxSteps } from "./sim.js";
 import { generateNpcIntents } from "./ai.js";
 import { saveToLocal, loadFromLocal, clearLocal, downloadJSON, uploadJSON } from "./storage.js";
 
+let paletteIndex = 0;
+
 const root = document.getElementById("root");
 
 let world = null;
