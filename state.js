@@ -10,7 +10,7 @@ export function createInitialWorld({ seed, mapSize, mapData, npcCount = 6 }){
     const id = `npc_${i}`;
     npcs[id] = {
       id,
-      name: `NPC ${i}`,
+      name: `Tribute ${i}`,
       areaId: 1,
       hp: 10,
       stamina: 10,
@@ -31,7 +31,7 @@ export function createInitialWorld({ seed, mapSize, mapData, npcCount = 6 }){
     entities: {
       player: {
         id: "player",
-        name: "Jogador",
+        name: "Player",
         areaId: 1,
         hp: 10,
         stamina: 10,

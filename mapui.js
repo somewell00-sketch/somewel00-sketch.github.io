@@ -1,4 +1,4 @@
-import { BIOME_PT, PALETTES } from "./mapgen.js";
+import { BIOME_EN, PALETTES } from "./mapgen.js";
 
 function rgbaFromHex(hex, a){
   const h = hex.replace("#","");
@@ -102,11 +102,10 @@ export class MapUI {
     canvas.addEventListener("click", (e) => this.handleClick(e));
   }
 
-  setData({ world, paletteIndex=0, ui=null }){
+  setData({ world, paletteIndex=0 }){
     this.world = world;
     this.paletteIndex = paletteIndex;
     this.geom = world.map.uiGeom;
-    this.ui = ui;
     this.render();
   }
 
@@ -188,7 +187,7 @@ export class MapUI {
       ctx.setLineDash([]);
       ctx.stroke();
 
-      if (c.id === 1) drawSafeLabel(ctx, c.poly, "🍞", true);
+      if (c.id === 1) drawSafeLabel(ctx, c.poly, "🏺", true);
       else drawSafeLabel(ctx, c.poly, String(c.id), false);
     }
 
@@ -243,23 +242,6 @@ export class MapUI {
       }
     }
 
-    // planned move destination (UI only)
-    {
-      const planned = this.ui?.plannedToAreaId;
-      if (planned != null && planned !== currentId){
-        const cell = cells.find(x => x.id === planned);
-        if (cell){
-          ctx.save();
-          ctx.strokeStyle = "rgba(255,255,255,0.85)";
-          ctx.lineWidth = 3;
-          ctx.setLineDash([4,6]);
-          drawPath(ctx, cell.poly);
-          ctx.stroke();
-          ctx.restore();
-        }
-      }
-    }
-
     ctx.restore();
 
     // outline blob
@@ -288,7 +270,7 @@ export class MapUI {
 
     return {
       id,
-      biome: BIOME_PT[area.biome] || area.biome,
+      biome: BIOME_EN[area.biome] || area.biome,
       color: area.color,
       hasWater: !!area.hasWater,
       visited,

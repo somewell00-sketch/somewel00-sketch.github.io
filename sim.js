@@ -22,26 +22,9 @@ export function advanceDay(world, playerActionsForDay = []){
   ];
 
   // 3) aplicar ações com regras
-  // Ordem (MVP): Ação 1 (combate/defesa) -> Ação 2 (movimento)
-  const phase1 = actions.filter(a => ["ATTACK","DEFEND","DO_NOTHING"].includes(a.type));
-  const phase2 = actions.filter(a => ["MOVE","STAY","REST"].includes(a.type));
-
-  for (const act of phase1){
-    if (act.type === "ATTACK"){
-      // placeholder: combate completo vem depois (por enquanto só loga)
-      events.push({ type: "ATTACK", who: act.source, payload: act.payload || {} });
-    } else if (act.type === "DEFEND"){
-      events.push({ type: "DEFEND", who: act.source });
-    } else if (act.type === "DO_NOTHING"){
-      events.push({ type: "DO_NOTHING", who: act.source });
-    }
-  }
-
-  for (const act of phase2){
+  for (const act of actions){
     if (act.type === "MOVE"){
-      applyMove(next, act.source, act.payload?.toAreaId, events);
-    } else if (act.type === "STAY"){
-      events.push({ type: "STAY", who: act.source });
+      applyMove(next, act.source, act.payload.toAreaId, events);
     } else if (act.type === "REST"){
       events.push({ type: "REST", who: act.source });
     }

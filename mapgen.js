@@ -252,27 +252,29 @@ function renumberCellsByBFS(cells, adj){
 }
 
 // --- Paletas + nomes PT (UI usa) ---
-export const BIOME_PT = {
-  glacier: "Geleira",
+export const BIOME_EN = {
+  cornucopia: "Cornucopia",
+  glacier: "Glacier",
   tundra: "Tundra",
-  mountain: "Montanha",
-  desert: "Deserto",
+  mountain: "Mountain",
+  desert: "Desert",
   caatinga: "Caatinga",
-  savanna: "Savana",
-  plains: "Planície",
-  woods: "Bosque",
-  forest: "Floresta",
-  jungle: "Selva",
-  fairy: "Bosque Fada",
-  swamp: "Pântano",
-  lake: "Lago",
-  industrial: "Área Industrial"
+  savanna: "Savanna",
+  plains: "Plains",
+  woods: "Woods",
+  forest: "Forest",
+  jungle: "Jungle",
+  fairy: "Fairy Grove",
+  swamp: "Swamp",
+  lake: "Lake",
+  industrial: "Industrial Zone"
 };
 
 export const PALETTES = [
   {
     ocean: "#070813",
     biomes: {
+      cornucopia: ["#d6b43b","#caa12d","#b9901a"],
       glacier: ["#f7fbff","#eef6ff","#e4f1ff"],
       tundra:  ["#e9efe8","#dbe5d8","#cfdccc"],
       mountain:["#a7b3be","#8f9eac","#7a8895"],
@@ -389,8 +391,9 @@ export function generateMapData({ seed, regions, width=820, height=820, paletteI
   // pass 1
   for(const cell of cells){
     if (cell.id === 1){
-      cell.biome = "fairy";
-      counts.fairy++;
+      cell.biome = "cornucopia";
+      // Cornucopia is a special biome (unique to Area 1)
+
       continue;
     }
     const scores = biomeScores(cell.features);
@@ -454,7 +457,7 @@ export function generateMapData({ seed, regions, width=820, height=820, paletteI
   // colors + base water flags
   for(const cell of cells){
     if(cell.id === 1){
-      cell.fillColor = "#6d3bd6";
+      cell.fillColor = colorForBiome("cornucopia", rng, paletteIndex);
     } else {
       cell.fillColor = colorForBiome(cell.biome, rng, paletteIndex);
     }
