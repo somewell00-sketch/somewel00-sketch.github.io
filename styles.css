@@ -125,9 +125,3 @@ textarea{
 }
 .small{ font-size:12px; }
 .sep{ height:1px; background: var(--line); border:0; margin: 6px 0; }
-
-
-.banner{padding:10px 12px;border-radius:12px;margin-top:10px;background:rgba(250,208,44,0.12);border:1px solid rgba(250,208,44,0.35);color:var(--text);font-size:13px;}
-.hidden{display:none !important;}
-.log{margin-top:10px;display:flex;flex-direction:column;gap:6px;max-height:120px;overflow:auto;}
-.log .item{padding:8px 10px;border-radius:12px;background:rgba(17,17,19,0.35);border:1px solid rgba(0,0,0,0.25);font-size:13px;}

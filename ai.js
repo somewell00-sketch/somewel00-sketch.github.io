@@ -38,32 +38,3 @@ function pseudoRandom(seed, day, str){
   h ^= h << 5; h >>>= 0;
   return (h >>> 0) / 4294967296;
 }
-
-
-// Generate ONLY Action 1 intents for NPCs (ATTACK/DEFEND/DO_NOTHING).
-export function generateNpcAction1Intents(world){
-  const intents = [];
-  const pArea = world.entities.player.areaId;
-
-  for(const npc of Object.values(world.entities.npcs)){
-    if(npc.hp <= 0) continue;
-
-    if(npc.areaId === pArea){
-      // MVP: deterministic-ish based on ids + day (no RNG dependency yet)
-      const day = world.meta?.day || 1;
-      const key = `${npc.id}:${day}`;
-      let h = 0;
-      for(let i=0;i<key.length;i++) h = (h*31 + key.charCodeAt(i)) >>> 0;
-      const r = (h % 1000) / 1000;
-
-      if(r < 0.35){
-        intents.push({ actorId: npc.id, type: "ATTACK", payload: { targetId: "player" } });
-      } else {
-        intents.push({ actorId: npc.id, type: "DO_NOTHING", payload: {} });
-      }
-    } else {
-      intents.push({ actorId: npc.id, type: "DO_NOTHING", payload: {} });
-    }
-  }
-  return intents;
-}
