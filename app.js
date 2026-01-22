@@ -11,7 +11,7 @@ let world = null;
 
 const uiState = {
   focusedAreaId: 1,
-  plannedRoute: [], // array of area ids
+  plannedRoute: [],
 };
 
 const DISTRICT_INFO = {
@@ -29,20 +29,25 @@ const DISTRICT_INFO = {
   12:{ name: "Coal mining", emoji: "⛏️", career: false },
 };
 
+function districtTag(d){
+  const info = DISTRICT_INFO[d] || { emoji:"🏷️", name:"" };
+  return `${info.emoji} Dist. ${d}`;
+}
+
 function renderStart(){
   root.innerHTML = `
     <div class="screen">
       <div class="card">
         <div class="h1">Arena Simulator</div>
-        <div class="muted">Choose your setup. Click areas to plan movement. Each day is confirmed via the Day screen.</div>
+        <div class="muted">Start in the Cornucopia (Area 1). Plan your move on the map, then commit actions.</div>
         <hr class="sep" />
 
         <div class="row">
           <label class="muted">Map size</label>
           <select id="size" class="select">
-            <option value="${MapSize.SMALL}">Small (24 areas)</option>
-            <option value="${MapSize.MEDIUM}" selected>Medium (48 areas)</option>
-            <option value="${MapSize.LARGE}">Large (72 areas)</option>
+            <option value="${MapSize.SMALL}">Small (24)</option>
+            <option value="${MapSize.MEDIUM}" selected>Medium (48)</option>
+            <option value="${MapSize.LARGE}">Large (72)</option>
           </select>
 
           <label class="muted">Players</label>
@@ -59,13 +64,9 @@ function renderStart(){
         </div>
 
         <div class="row" style="margin-top:10px;">
-          <button id="enter" class="btn primary">Enter arena</button>
-          <button id="resume" class="btn">Resume save</button>
+          <button id="enter" class="btn primary" style="flex:1;">Enter arena</button>
+          <button id="resume" class="btn">Resume</button>
           <button id="wipe" class="btn">Clear save</button>
-        </div>
-
-        <div class="muted small" style="margin-top:10px;">
-          Tip: run on a local server to avoid CORS issues (ex: <code>python -m http.server</code>).
         </div>
       </div>
     </div>
@@ -80,10 +81,7 @@ function renderStart(){
 
   document.getElementById("resume").onclick = () => {
     const saved = loadFromLocal();
-    if(!saved){
-      alert("No save found.");
-      return;
-    }
+    if(!saved){ alert("No save found."); return; }
     world = saved;
     uiState.focusedAreaId = world.entities.player.areaId;
     uiState.plannedRoute = [];
@@ -117,153 +115,160 @@ function renderGame(){
   root.innerHTML = `
     <div class="app">
       <aside class="panel">
-        <div class="row space">
-          <div>
-            <div class="h1" style="margin:0;">Control Panel</div>
-            <div class="muted small">Day: <span id="day"></span> • Seed: <span id="seed"></span></div>
+        <div class="h1" style="margin:0;">Arena</div>
+        <div class="muted small">Day <span id="day"></span> • Seed <span id="seed"></span></div>
+
+        <div class="section">
+          <button id="commit" class="btn primary" style="width:100%; padding:12px 14px;">Commit Actions</button>
+          <div class="muted small" style="margin-top:6px;">Plan movement on the map, then commit 2 actions.</div>
+        </div>
+
+        <div class="section">
+          <div class="muted">Focused area</div>
+          <div class="row" style="margin-top:6px;">
+            <span class="pill"><span class="swatch" id="swatch"></span><span id="title">—</span></span>
+            <span class="pill" id="visitedCount">Visited: —</span>
+          </div>
+
+          <div class="muted" style="margin-top:10px;">Occupants</div>
+          <div id="occupants" class="list"></div>
+
+          <div class="kv">
+            <div>Area</div><div id="infoNum">—</div>
+            <div>Biome</div><div id="infoBiome">—</div>
+            <div>Water</div><div id="infoWater">—</div>
+            <div>Visited</div><div id="infoVisited">—</div>
+            <div>Plan</div><div id="infoPlan">—</div>
           </div>
         </div>
 
-        <div class="row" style="margin-top:10px;">
-          <button id="openDay" class="btn primary">Day screen</button>
-          <button id="regen" class="btn">New map</button>
-          <button id="resetProgress" class="btn">Restart</button>
+        <div class="section">
+          <div class="muted">Tools</div>
+          <div class="row" style="margin-top:8px;">
+            <button id="regen" class="btn">New map</button>
+            <button id="restart" class="btn">Restart</button>
+          </div>
+          <div class="row" style="margin-top:8px;">
+            <button id="saveLocal" class="btn">Save</button>
+            <button id="export" class="btn">Export JSON</button>
+            <label class="btn" style="display:inline-flex; align-items:center; gap:8px;">
+              Import <input id="import" type="file" accept="application/json" style="display:none" />
+            </label>
+            <button id="clearLocal" class="btn">Clear save</button>
+          </div>
         </div>
-
-        <div class="row">
-          <button id="saveLocal" class="btn">Save</button>
-          <button id="export" class="btn">Export JSON</button>
-          <label class="btn" style="display:inline-flex; align-items:center; gap:8px;">
-            Import JSON <input id="import" type="file" accept="application/json" style="display:none" />
-          </label>
-          <button id="clearLocal" class="btn">Clear save</button>
-        </div>
-
-        <div class="row">
-          <span class="pill"><span class="swatch" id="swatch"></span><span id="title">—</span></span>
-          <span class="pill" id="visitedCount">Visited: —</span>
-        </div>
-
-        <div class="row">
-          <span class="pill"><strong>You</strong><span id="youDistrict">—</span></span>
-          <span class="pill">HP <span id="youHP" style="font-family:var(--mono);">—</span></span>
-          <span class="pill">FP <span id="youFP" style="font-family:var(--mono);">—</span></span>
-        </div>
-
-        <div class="muted">Occupants</div>
-        <div id="occupants" class="list"></div>
-
-        <div class="kv">
-          <div>Area</div><div id="infoNum">—</div>
-          <div>Biome</div><div id="infoBiome">—</div>
-          <div>Water</div><div id="infoWater">—</div>
-          <div>Visited</div><div id="infoVisited">—</div>
-          <div>Visitable</div><div id="infoVisit">—</div>
-          <div>Plan</div><div id="infoPlan">—</div>
-        </div>
-
-        <div class="muted">Notes</div>
-        <textarea id="notes" placeholder="Optional notes per area..."></textarea>
       </aside>
 
       <main class="canvasWrap">
         <canvas id="c" width="820" height="820"></canvas>
-        <div class="hint">Map = UI • Engine runs by days • Cornucopia = Area 1</div>
+        <div class="hint">Cornucopia is Area 1 • Red border = closes next day</div>
       </main>
+
+      <aside class="panel">
+        <div class="h1" style="margin:0;">You</div>
+        <div class="muted small"><span id="youDistrict">—</span></div>
+
+        <div class="row" style="margin-top:10px;">
+          <span class="pill">HP <span id="youHP" style="font-family:var(--mono);">—</span></span>
+          <span class="pill">FP <span id="youFP" style="font-family:var(--mono);">—</span></span>
+          <span class="pill">Kills <span id="youKills" style="font-family:var(--mono);">—</span></span>
+        </div>
+
+        <div class="kv" style="margin-top:10px;">
+          <div>Visited areas</div><div id="youVisited">—</div>
+          <div>Max steps</div><div id="youSteps">—</div>
+          <div>Inventory</div><div class="muted">Soon</div>
+        </div>
+      </aside>
     </div>
   `;
 
   const dayEl = document.getElementById("day");
   const seedEl = document.getElementById("seed");
+
   const swatch = document.getElementById("swatch");
   const title = document.getElementById("title");
   const visitedCount = document.getElementById("visitedCount");
-  const youDistrict = document.getElementById("youDistrict");
-  const youHP = document.getElementById("youHP");
-  const youFP = document.getElementById("youFP");
+  const occupantsEl = document.getElementById("occupants");
 
   const infoNum = document.getElementById("infoNum");
   const infoBiome = document.getElementById("infoBiome");
   const infoWater = document.getElementById("infoWater");
   const infoVisited = document.getElementById("infoVisited");
-  const infoVisit = document.getElementById("infoVisit");
   const infoPlan = document.getElementById("infoPlan");
-  const occupantsEl = document.getElementById("occupants");
+
+  const youDistrict = document.getElementById("youDistrict");
+  const youHP = document.getElementById("youHP");
+  const youFP = document.getElementById("youFP");
+  const youKills = document.getElementById("youKills");
+  const youVisited = document.getElementById("youVisited");
+  const youSteps = document.getElementById("youSteps");
 
   const canvas = document.getElementById("c");
   const mapUI = new MapUI({
     canvas,
     onAreaClick: (id) => {
-      setFocus(id);
+      uiState.focusedAreaId = id;
       planMoveTo(id);
+      sync();
     }
   });
-
-  function setFocus(id){
-    uiState.focusedAreaId = id;
-    sync();
-  }
 
   function planMoveTo(id){
     const from = world.entities.player.areaId;
     const adj = world.map.adjById[String(from)] || [];
     const area = world.map.areasById[String(id)];
+    if(!area || area.isActive === false) return;
 
-    // Only plan if visitable and active.
-    if (!area || area.isActive === false) return;
-    if (id !== from && !adj.includes(id)) return;
-
-    // MVP route planning: 1 step by click (later we can allow 2-3 step routes)
-    if (id === from){
+    if(id === from){
       uiState.plannedRoute = [];
-    } else {
+      return;
+    }
+
+    // MVP: 1-step plan. (Later: multi-step)
+    if(adj.includes(id)){
       uiState.plannedRoute = [id];
     }
-    sync();
-  }
-
-  function districtTag(d){
-    const info = DISTRICT_INFO[d] || { emoji:"🏷️" };
-    return `${info.emoji} Dist. ${d}`;
   }
 
   function sync(){
+    if(!world) return;
+
     dayEl.textContent = String(world.meta.day);
     seedEl.textContent = String(world.meta.seed);
 
     const p = world.entities.player;
+
     const dInfo = DISTRICT_INFO[p.district] || {};
     youDistrict.textContent = `${districtTag(p.district)} • ${dInfo.name || ""}`;
     youHP.textContent = String(p.hp ?? 100);
     youFP.textContent = String(p.fp ?? 70);
+    youKills.textContent = String(p.kills ?? 0);
+    youVisited.textContent = String(world.flags.visitedAreas.length);
+    youSteps.textContent = String(maxSteps(p));
 
     visitedCount.textContent = `Visited: ${world.flags.visitedAreas.length}`;
 
     const focus = uiState.focusedAreaId;
-    const info = mapUI.getAreaInfo(focus);
-    if (info){
-      title.textContent = (info.id === 1) ? `Area 1 (🏺 Cornucopia)` : `Area ${info.id}`;
-      swatch.style.background = info.color || "#2a2f3a";
-      infoNum.textContent = String(info.id);
-      infoBiome.textContent = info.biome || "—";
-      infoWater.textContent = (info.hasWater == null) ? "—" : (info.hasWater ? "Yes" : "No");
-      infoVisited.textContent = info.visited ? "Yes" : "No";
-      infoVisit.textContent = info.visitable ? "Yes" : "No";
-      infoPlan.textContent = uiState.plannedRoute.length ? uiState.plannedRoute.join(" → ") : "—";
-    }
+    const a = world.map.areasById[String(focus)];
+    const visited = world.flags.visitedAreas.includes(focus);
 
-    // Occupants list (only in visited areas, and always in your current area)
+    title.textContent = (focus === 1) ? `Area 1 (🏺 Cornucopia)` : `Area ${focus}`;
+    swatch.style.background = (visited ? (a?.color || "#2a2f3a") : "#2a2f3a");
+
+    infoNum.textContent = String(focus);
+    infoBiome.textContent = visited ? (a?.biome || "—") : "Unknown";
+    infoWater.textContent = visited ? ((a?.hasWater) ? "Yes" : "No") : "Unknown";
+    infoVisited.textContent = visited ? "Yes" : "No";
+    infoPlan.textContent = uiState.plannedRoute.length ? uiState.plannedRoute.join(" → ") : "—";
+
+    // Occupants: reveal if visited OR your current area
+    const reveal = visited || (focus === p.areaId);
     const occ = [];
-    const areaId = focus;
-
-    // If fog-of-war and not visited, we won't reveal occupants unless it's your area.
-    const isVisited = world.flags.visitedAreas.includes(areaId);
-    const reveal = isVisited || (areaId === world.entities.player.areaId);
-
-    if (reveal){
-      if (p.areaId === areaId) occ.push({ name: "You", district: p.district });
-      for (const npc of Object.values(world.entities.npcs)){
-        if (npc.areaId === areaId) occ.push({ name: npc.name, district: npc.district });
+    if(reveal){
+      if(p.areaId === focus) occ.push({ name: "You", district: p.district, id: "player" });
+      for(const npc of Object.values(world.entities.npcs)){
+        if(npc.areaId === focus) occ.push({ name: npc.name, district: npc.district, id: npc.id });
       }
     }
 
@@ -275,24 +280,17 @@ function renderGame(){
     mapUI.render();
   }
 
-  document.getElementById("openDay").onclick = () => openDayModal();
+  document.getElementById("commit").onclick = () => openCommitModal();
 
   document.getElementById("regen").onclick = () => {
-    const mapSize = world.meta.mapSize;
-    startNewGame(mapSize, world.meta.totalPlayers || 12, world.entities.player.district || 12);
+    startNewGame(world.meta.mapSize, world.meta.totalPlayers || 12, world.entities.player.district || 12);
   };
-
-  document.getElementById("resetProgress").onclick = () => {
+  document.getElementById("restart").onclick = () => {
     clearLocal();
     world = null;
     renderStart();
   };
-
-  document.getElementById("saveLocal").onclick = () => {
-    saveToLocal(world);
-    alert("Saved.");
-  };
-
+  document.getElementById("saveLocal").onclick = () => { saveToLocal(world); alert("Saved."); };
   document.getElementById("export").onclick = () => downloadJSON(world);
 
   document.getElementById("import").onchange = async (e) => {
@@ -311,44 +309,51 @@ function renderGame(){
     alert("Save cleared. Refresh and start a new game.");
   };
 
-  // Initial paint
   mapUI.setData({ world, paletteIndex: 0 });
   sync();
 
-  function openDayModal(){
-    // Determine if Attack is available: any NPC in same area
+  function openCommitModal(){
     const p = world.entities.player;
-    const sameAreaNpcs = Object.values(world.entities.npcs).filter(n => n.areaId === p.areaId);
+
+    const sameAreaNpcs = Object.values(world.entities.npcs).filter(n => n.areaId === p.areaId && (n.hp ?? 0) > 0);
     const canAttack = sameAreaNpcs.length > 0;
 
     const overlay = document.createElement("div");
     overlay.className = "modalOverlay";
     overlay.innerHTML = `
       <div class="modal">
-        <div class="h1" style="margin:0;">Day ${world.meta.day}</div>
-        <div class="muted small" style="margin-top:6px;">You must lock in 2 actions.</div>
+        <div class="h1" style="margin:0;">Commit actions (Day ${world.meta.day})</div>
+        <div class="muted small" style="margin-top:6px;">Two mandatory actions. Defaults: Do nothing + Stay.</div>
 
         <div class="section">
-          <h3>Action 1 (mandatory)</h3>
+          <h3>Action 1</h3>
           <div class="row">
             <button id="a1Attack" class="btn" ${canAttack ? "" : "disabled"}>Attack</button>
             <button id="a1Defend" class="btn">Defend</button>
             <button id="a1Nothing" class="btn">Do nothing</button>
           </div>
-          <div class="muted small" id="a1Hint" style="margin-top:6px;">
-            ${canAttack ? "Attack is available (someone is in your area)." : "No valid targets: Attack is disabled."}
+
+          <div class="row" style="margin-top:8px; align-items:center;">
+            <label class="muted small">Target</label>
+            <select id="target" class="select" ${canAttack ? "" : "disabled"}>
+              ${sameAreaNpcs.map(n => `<option value="${n.id}">${escapeHtml(n.name)} (${districtTag(n.district)})</option>`).join("")}
+            </select>
+          </div>
+
+          <div class="muted small" style="margin-top:6px;">
+            ${canAttack ? "Attack available: choose a target in your area." : "No valid targets here."}
           </div>
         </div>
 
         <div class="section">
-          <h3>Action 2 (mandatory)</h3>
+          <h3>Action 2</h3>
           <div class="row">
             <button id="a2Move" class="btn">Move</button>
             <button id="a2Stay" class="btn">Stay</button>
           </div>
           <div class="muted small" style="margin-top:6px;">
             Planned route: <span style="font-family:var(--mono);">${uiState.plannedRoute.length ? uiState.plannedRoute.join(" → ") : "—"}</span>
-            • Max steps today: <span style="font-family:var(--mono);">${maxSteps(p)}</span>
+            • Max steps: <span style="font-family:var(--mono);">${maxSteps(p)}</span>
           </div>
         </div>
 
@@ -360,11 +365,10 @@ function renderGame(){
     `;
     document.body.appendChild(overlay);
 
-    let action1 = canAttack ? "ATTACK" : "DEFEND";
+    let action1 = "DO_NOTHING";
     let action2 = "STAY";
 
     const setBtnState = () => {
-      // simple highlight by border
       overlay.querySelectorAll("button").forEach(b => b.style.outline = "");
       const b1 = overlay.querySelector(action1==="ATTACK" ? "#a1Attack" : action1==="DEFEND" ? "#a1Defend" : "#a1Nothing");
       if (b1) b1.style.outline = "2px solid var(--accent)";
@@ -372,9 +376,7 @@ function renderGame(){
       if (b2) b2.style.outline = "2px solid var(--accent)";
     };
 
-    const close = () => overlay.remove();
-
-    overlay.querySelector("#close").onclick = close;
+    overlay.querySelector("#close").onclick = () => overlay.remove();
 
     overlay.querySelector("#a1Attack").onclick = () => { if(canAttack){ action1="ATTACK"; setBtnState(); } };
     overlay.querySelector("#a1Defend").onclick = () => { action1="DEFEND"; setBtnState(); };
@@ -386,34 +388,45 @@ function renderGame(){
     setBtnState();
 
     overlay.querySelector("#confirm").onclick = () => {
-      // Build player actions
       const actions = [];
-      actions.push({ source: "player", type: action1, payload: {} });
 
+      // Action 1
+      if(action1 === "ATTACK"){
+        const targetId = overlay.querySelector("#target")?.value || null;
+        if(targetId){
+          actions.push({ source: "player", type: "ATTACK", payload: { targetId } });
+        } else {
+          actions.push({ source: "player", type: "DO_NOTHING", payload: {} });
+        }
+      } else if (action1 === "DEFEND"){
+        actions.push({ source: "player", type: "DEFEND", payload: {} });
+      } else {
+        actions.push({ source: "player", type: "DO_NOTHING", payload: {} });
+      }
+
+      // Action 2
       if (action2 === "MOVE"){
         const route = uiState.plannedRoute.slice();
-        if (route.length === 0){
-          // no plan => treat as stay
-          actions.push({ source: "player", type: "STAY", payload: {} });
-        } else {
+        if(route.length){
           actions.push({ source: "player", type: "MOVE", payload: { route } });
+        } else {
+          actions.push({ source: "player", type: "STAY", payload: {} });
         }
       } else {
         actions.push({ source: "player", type: "STAY", payload: {} });
       }
 
-      // AI intents
+      // NPC intents (already include 2 actions each)
       const intents = generateNpcIntents(world);
 
-      // Advance day through engine
+      // Engine advance (returns next world)
       world = advanceDay(world, [...actions, ...intents]);
 
-      // Clear plan after day commits
       uiState.plannedRoute = [];
       uiState.focusedAreaId = world.entities.player.areaId;
 
       saveToLocal(world);
-      close();
+      overlay.remove();
       sync();
     };
   }

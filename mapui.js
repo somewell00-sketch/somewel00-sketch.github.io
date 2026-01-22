@@ -182,17 +182,6 @@ export class MapUI {
       drawPath(ctx, c.poly);
       ctx.fill();
 
-      // Closing warning: red border one day before area closes.
-      const willClose = area.willCloseOnDay;
-      if(area.isActive !== false && willClose != null && willClose === (this.world.meta.day + 1)){
-        ctx.save();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = "#ff3b3b";
-        ctx.stroke();
-        ctx.restore();
-      }
-
-
       ctx.strokeStyle = "rgba(0,0,0,0.22)";
       ctx.lineWidth = 1;
       ctx.setLineDash([]);

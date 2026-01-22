@@ -33,7 +33,7 @@ a{ color: var(--accent); }
 
 .app{
   display:grid;
-  grid-template-columns: 360px 1fr;
+  grid-template-columns: 360px 1fr 320px;
   gap:16px;
   padding:16px;
   height:100vh;

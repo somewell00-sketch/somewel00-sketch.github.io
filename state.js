@@ -7,10 +7,9 @@ export const MapSize = {
 };
 
 export function createInitialWorld({ seed, mapSize, mapData, totalPlayers = 12, playerDistrict = 12 }){
-    const total = Math.max(2, Math.min(48, Number(totalPlayers) || 12));
+  const total = Math.max(2, Math.min(48, Number(totalPlayers) || 12));
   const npcCount = total - 1;
 
-  // District distribution: 12 -> 1 per district; 24 -> 2 per district; 48 -> 4 per district.
   const perDistrict = Math.max(1, Math.floor(total / 12));
   const rng = mulberry32(seed);
 
@@ -18,13 +17,10 @@ export function createInitialWorld({ seed, mapSize, mapData, totalPlayers = 12, 
   for(let d=1; d<=12; d++){
     for(let k=0; k<perDistrict; k++) pool.push(d);
   }
-
-  // Remove one slot for the player's chosen district.
   const pd = Math.min(12, Math.max(1, Number(playerDistrict) || 12));
   const idx = pool.indexOf(pd);
   if(idx !== -1) pool.splice(idx, 1);
 
-  // Shuffle pool deterministically
   for(let i=pool.length-1; i>0; i--){
     const j = Math.floor(rng.next() * (i+1));
     const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
@@ -40,13 +36,15 @@ export function createInitialWorld({ seed, mapSize, mapData, totalPlayers = 12, 
       areaId: 1,
       hp: 100,
       fp: 70,
+      kills: 0,
+      attrs: randomAttrs7(rng),
       status: [],
       inventory: {},
       memory: { goal: "survive" }
     };
   }
 
-  return {
+  const world = {
     meta: {
       version: 1,
       seed,
@@ -54,7 +52,7 @@ export function createInitialWorld({ seed, mapSize, mapData, totalPlayers = 12, 
       mapSize,
       totalPlayers: total
     },
-    map: mapData, // { areasById, adjById, uiGeom }
+    map: mapData.map,
     entities: {
       player: {
         id: "player",
@@ -63,30 +61,52 @@ export function createInitialWorld({ seed, mapSize, mapData, totalPlayers = 12, 
         areaId: 1,
         hp: 100,
         fp: 70,
+        kills: 0,
+        attrs: { F: 3, D: 2, P: 2 },
         status: [],
         inventory: {},
-        memory: {}
+        memory: { goal: "survive" }
       },
       npcs
+    },
+    systems: {
+      combat: { declarations: {} }
     },
     flags: {
       visitedAreas: [1],
       closedAreas: []
     },
     log: {
-      days: [] // [{day, events:[]}]
+      days: []
     },
     replay: {
-      playerActionsByDay: [] // array index day-1
+      playerActionsByDay: []
     }
   };
+
+  // Ensure area 1 is Cornucopia biome
+  const a1 = world.map.areasById?.["1"];
+  if(a1){
+    a1.biome = "Cornucopia";
+  }
+
+  return world;
+}
+
+function randomAttrs7(rng){
+  // random non-negative ints summing to 7
+  let F = rng.int(0,7);
+  let D = rng.int(0,7-F);
+  let P = 7 - F - D;
+  // shuffle distribution a bit
+  const arr = [F,D,P];
+  for(let i=2;i>0;i--){
+    const j = Math.floor(rng.next() * (i+1));
+    const t = arr[i]; arr[i]=arr[j]; arr[j]=t;
+  }
+  return { F: arr[0], D: arr[1], P: arr[2] };
 }
 
 export function cloneWorld(world){
-  return structuredClone(world);
-}
-
-
-export function getAllActors(world){
-  return [world.entities.player, ...Object.values(world.entities.npcs)];
+  return JSON.parse(JSON.stringify(world));
 }

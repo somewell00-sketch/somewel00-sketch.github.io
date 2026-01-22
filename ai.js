@@ -1,36 +1,33 @@
-// AI generates INTENTS. It must NOT mutate world state.
 export function generateNpcIntents(world){
   const intents = [];
-  const currentDay = world.meta.day;
+  const day = world?.meta?.day ?? 1;
+  const seed = world?.meta?.seed ?? 1;
 
   for (const npc of Object.values(world.entities.npcs)){
+    // Action 1: default defend (placeholder)
+    intents.push({ source: npc.id, type: "DEFEND", payload: {} });
+
+    // Action 2: small move chance
     const adj = world.map.adjById[String(npc.areaId)] || [];
     if (adj.length === 0) continue;
 
-    // small chance to rest
-    const r = pseudoRandom(world.meta.seed, currentDay, npc.id);
-    if (r < 0.25){
-      intents.push({ source: npc.id, type: "REST", payload: {} });
-      continue;
+    const r = prng(seed, day, npc.id);
+    if (r < 0.55){
+      const idx = Math.floor(prng(seed+999, day, npc.id) * adj.length);
+      intents.push({ source: npc.id, type: "MOVE", payload: { route: [adj[idx]] } });
+    } else {
+      intents.push({ source: npc.id, type: "STAY", payload: {} });
     }
-
-    const idx = Math.floor(pseudoRandom(world.meta.seed + 999, currentDay, npc.id) * adj.length);
-    const toAreaId = adj[idx];
-
-    intents.push({ source: npc.id, type: "MOVE", payload: { toAreaId } });
   }
-
   return intents;
 }
 
-function pseudoRandom(seed, day, id){
-  // deterministic tiny PRNG based on a few integers
+function prng(seed, day, id){
   let h = 2166136261 >>> 0;
   const s = String(seed) + "|" + String(day) + "|" + String(id);
-  for (let i = 0; i < s.length; i++){
+  for (let i=0;i<s.length;i++){
     h ^= s.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
-  // convert to [0,1)
   return (h >>> 0) / 4294967296;
 }

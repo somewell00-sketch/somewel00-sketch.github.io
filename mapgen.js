@@ -483,12 +483,7 @@ export function generateMapData({ seed, regions, width=820, height=820, paletteI
       id: c.id,
       biome: c.biome,
       color: c.fillColor,
-      hasWater: !!c.hasWater,
-      // Movement rule: water needs a bridge. This is a coarse MVP flag per-area.
-      // (Future: per-edge water crossing.)
-      hasBridge: !!c.hasBridge,
-      isActive: true,
-      willCloseOnDay: null
+      hasWater: !!c.hasWater
     };
     adjById[String(c.id)] = Array.from(adj.get(c.id) || []).sort((a,b)=>a-b);
   }
