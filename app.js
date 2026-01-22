@@ -334,68 +334,25 @@ function renderGame(){
 
     modalRoot.innerHTML = `
       <div class="modalOverlay">
-        <div class="modal">
-          <div class="row" style="justify-content:space-between;">
-            <div>
-              <div class="h1" style="margin:0;">Day ${world.meta.day} • Lock in actions</div>
-              <div class="muted small">Action 1 happens before movement. Movement uses your step limit (HP>30 and FP>20 = up to 3 steps; otherwise 1).</div>
-            </div>
-            <button id="closeModal" class="btn">Close</button>
-          </div>
+      <div class="modal">
+        <h2>Lock in day actions</h2>
 
-          <hr class="sep" />
-
-          <div class="modalGrid">
-            <div class="card" style="padding:12px;">
-              <div class="h2">Action 1: Attack or Defend</div>
-              <div class="muted small">If there is no valid target, Attack is disabled.</div>
-
-              <div class="row" style="margin-top:10px;">
-                <label class="tag" style="cursor:pointer;">
-                  <input type="radio" name="a1" value="DEFEND" checked />
-                  Defend
-                </label>
-                <label class="tag" style="cursor:pointer; opacity:${canAttack?1:0.4};">
-                  <input type="radio" name="a1" value="ATTACK" ${canAttack ? "" : "disabled"} />
-                  Attack
-                </label>
-              </div>
-
-              <div style="margin-top:10px;">
-                <div class="muted small">Target (only if Attack)</div>
-                <select id="target" class="select" ${canAttack ? "" : "disabled"}>
-                  ${here.map(a => `<option value="${a.id}">${escapeHtml(a.name)} (Dist. ${a.district})</option>`).join("")}
-                </select>
-              </div>
-            </div>
-
-            <div class="card" style="padding:12px;">
-              <div class="h2">Action 2: Move or Stay</div>
-              <div class="muted small">Build your route by clicking the map. Route is limited by steps and adjacency.</div>
-
-              <div class="row" style="margin-top:10px;">
-                <label class="tag" style="cursor:pointer;">
-                  <input type="radio" name="a2" value="MOVE" checked />
-                  Move
-                </label>
-                <label class="tag" style="cursor:pointer;">
-                  <input type="radio" name="a2" value="STAY" />
-                  Stay
-                </label>
-              </div>
-
-              <div style="margin-top:10px;">
-                <div class="muted small">Planned route</div>
-                <div class="pill" style="margin-top:6px;"><strong>${uiState.plannedRoute.length ? uiState.plannedRoute.join(" → ") : "—"}</strong></div>
-              </div>
-            </div>
-          </div>
-
-          <div class="row" style="justify-content:flex-end; margin-top:12px;">
-            <button id="confirmDay" class="btn primary">Confirm and advance day</button>
-          </div>
+        <div class="section">
+          <h3>Action 1</h3>
+          <button data-action="ATTACK" id="a1Attack">Attack</button>
+          <button data-action="DEFEND" id="a1Defend">Defend</button>
         </div>
+
+        <div class="section">
+          <h3>Action 2</h3>
+          <button data-move="MOVE" id="a2Move">Move</button>
+          <button data-move="STAY" id="a2Stay">Stay</button>
+        </div>
+
+        <button id="confirmDay" class="btn primary">Confirm & Advance</button>
+        <button id="closeModal" class="btn">Close</button>
       </div>
+    </div>
     `;
 
     document.getElementById("closeModal").onclick = () => { modalRoot.innerHTML = ""; };
