@@ -1,7 +1,7 @@
 import { MapSize, createInitialWorld } from "./state.js";
 import { generateMapData } from "./mapgen.js";
 import { MapUI } from "./mapui.js";
-import { advanceDay, maxSteps } from "./sim.js";
+import { commitPlayerAction, endDay as simEndDay, advanceDay, maxSteps } from "./sim.js";
 import { generateNpcIntents } from "./ai.js";
 import { saveToLocal, loadFromLocal, clearLocal, downloadJSON, uploadJSON } from "./storage.js";
 
@@ -352,7 +352,13 @@ function finalizeDay(){
   sync();
 }
 
-  function sync(){
+  
+  function setFocus(areaId){
+    focusedId = areaId;
+    // no side effects beyond focus; rendering handled by sync()
+  }
+
+function sync(){
     mapUI.setData({ world, paletteIndex });
     setFocus(focusedId);
     updateUiState();

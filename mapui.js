@@ -127,7 +127,7 @@ export class MapUI {
   }
 
   hitTest(x,y){
-    if(!this.data || !this.data.uiGeom || !this.data.uiGeom.cells) return null;
+    if(!this.geom || !this.geom.cells) return null;
 
     // brute-force ok
     const cells = this.geom.cells;
