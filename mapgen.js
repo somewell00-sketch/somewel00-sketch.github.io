@@ -252,9 +252,25 @@ function renumberCellsByBFS(cells, adj){
 }
 
 // --- Paletas + nomes PT (UI usa) ---
-// --- Biome display names (UI) ---
+export const BIOME_PT = {
+  glacier: "Geleira",
+  tundra: "Tundra",
+  mountain: "Montanha",
+  desert: "Deserto",
+  caatinga: "Caatinga",
+  savanna: "Savana",
+  plains: "Planície",
+  woods: "Bosque",
+  forest: "Floresta",
+  jungle: "Selva",
+  fairy: "Bosque Fada",
+  swamp: "Pântano",
+  lake: "Lago",
+  industrial: "Área Industrial",
+  cornucopia: "Cornucópia"
+};
+
 export const BIOME_EN = {
-  cornucopia: "Cornucopia",
   glacier: "Glacier",
   tundra: "Tundra",
   mountain: "Mountain",
@@ -265,14 +281,15 @@ export const BIOME_EN = {
   woods: "Woods",
   forest: "Forest",
   jungle: "Jungle",
-  fairy: "Fairy Grove",
+  fairy: "Fairy Woods",
   swamp: "Swamp",
   lake: "Lake",
-  industrial: "Industrial Zone"
+  industrial: "Industrial Zone",
+  cornucopia: "Cornucopia"
 };
 
-export const PALETTES = [
 
+export const PALETTES = [
   {
     ocean: "#070813",
     biomes: {
@@ -392,8 +409,8 @@ export function generateMapData({ seed, regions, width=820, height=820, paletteI
   // pass 1
   for(const cell of cells){
     if (cell.id === 1){
-      cell.biome = "cornucopia";
-      // Cornucopia is a special biome, not part of quotas
+      cell.biome = "fairy";
+      counts.fairy++;
       continue;
     }
     const scores = biomeScores(cell.features);
@@ -457,11 +474,11 @@ export function generateMapData({ seed, regions, width=820, height=820, paletteI
   // colors + base water flags
   for(const cell of cells){
     if(cell.id === 1){
-      cell.fillColor = colorForBiome("cornucopia", rng, paletteIndex);
+      cell.fillColor = "#6d3bd6";
     } else {
       cell.fillColor = colorForBiome(cell.biome, rng, paletteIndex);
     }
-    cell.hasWater = (cell.id === 1) ? false : (cell.biome === "lake" || cell.biome === "swamp");
+    cell.hasWater = (cell.biome === "lake" || cell.biome === "swamp");
   }
 
   // river (marks hasWater on crossed cells)
@@ -486,9 +503,7 @@ export function generateMapData({ seed, regions, width=820, height=820, paletteI
       id: c.id,
       biome: c.biome,
       color: c.fillColor,
-      hasWater: !!c.hasWater,
-      isActive: true,
-      hasFood: ["plains","woods","forest","jungle","savanna","caatinga"].includes(c.biome)
+      hasWater: !!c.hasWater
     };
     adjById[String(c.id)] = Array.from(adj.get(c.id) || []).sort((a,b)=>a-b);
   }

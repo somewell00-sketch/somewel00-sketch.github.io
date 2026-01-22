@@ -102,44 +102,18 @@ export class MapUI {
     canvas.addEventListener("click", (e) => this.handleClick(e));
   }
 
-  setData({ world, paletteIndex=0, uiState=null }){
+  setData({ world, paletteIndex=0 }){
     this.world = world;
-    this.uiState = uiState || {};
     this.paletteIndex = paletteIndex;
     this.geom = world.map.uiGeom;
     this.render();
   }
 
   isVisitable(areaId){
-    const world = this.world;
-    const player = world.entities.player;
-    const start = player.areaId;
-
-    // cannot move through or into inactive areas
-    const isActive = (id) => world.map.areasById[String(id)]?.isActive !== false;
-
-    if (!isActive(areaId)) return false;
-
-    const maxSteps = (player.hp > 30 && player.stamina > 20) ? 3 : 1;
-
-    if (areaId === start) return true;
-
-    // BFS up to maxSteps
-    const q = [[start, 0]];
-    const seen = new Set([start]);
-    while(q.length){
-      const [cur, d] = q.shift();
-      if (d >= maxSteps) continue;
-      const adj = world.map.adjById[String(cur)] || [];
-      for (const n of adj){
-        if (seen.has(n)) continue;
-        if (!isActive(n)) continue;
-        if (n === areaId) return true;
-        seen.add(n);
-        q.push([n, d+1]);
-      }
-    }
-    return false;
+    const cur = this.world.entities.player.areaId;
+    if (areaId === cur) return true;
+    const adj = this.world.map.adjById[String(cur)] || [];
+    return adj.includes(areaId);
   }
 
   canvasToLocal(evt){
@@ -202,9 +176,14 @@ export class MapUI {
       if(!area) continue;
 
       const isVisited = visited.has(c.id);
-      const alpha = isVisited ? 1.00 : 0.30;
 
-      ctx.fillStyle = rgbaFromHex(area.color, alpha);
+// Fog of war: unvisited areas are rendered with a dark bluish-gray,
+// and we don't reveal biome colors until visited.
+if (!isVisited){
+  ctx.fillStyle = "#2a2f3a";
+} else {
+  ctx.fillStyle = rgbaFromHex(area.color, 1.00);
+}
       drawPath(ctx, c.poly);
       ctx.fill();
 
@@ -294,12 +273,24 @@ export class MapUI {
     const visited = new Set(this.world.flags.visitedAreas).has(id);
     const visitable = this.isVisitable(id);
 
+    // Fog of war: if not visited, hide biome/water details.
+    if(!visited){
+      return {
+        id,
+        biome: "Unknown",
+        color: null,
+        hasWater: null,
+        visited,
+        visitable,
+        current: (id === cur)
+      };
+    }
+
     return {
       id,
       biome: BIOME_EN[area.biome] || area.biome,
       color: area.color,
       hasWater: !!area.hasWater,
-      isActive: area.isActive !== false,
       visited,
       visitable,
       current: (id === cur)
