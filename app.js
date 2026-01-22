@@ -207,6 +207,11 @@ function renderGame(){
   const swatch = document.getElementById("swatch");
   const title = document.getElementById("title");
   const visitedCount = document.getElementById("visitedCount");
+  const bannerEl = document.getElementById("banner");
+  const commitBtn = document.getElementById("commitAction");
+  const endBtn = document.getElementById("endDay");
+  const movesLeftEl = document.getElementById("movesLeft");
+  const entityLocsEl = document.getElementById("entityLocs");
   const movesLeftEl = document.getElementById("movesLeft");
   const entityLocsEl = document.getElementById("entityLocs");
   const occupantsEl = document.getElementById("occupants");
@@ -229,13 +234,40 @@ function renderGame(){
   const canvas = document.getElementById("c");
   const mapUI = new MapUI({
     canvas,
+    isMovementEnabled: () => (world.turnDraft?.phase === "MOVE"),
     getCurrentAreaId: () => {
       const r = world.turnDraft?.route || [];
       return r.length ? r[r.length-1] : world.entities.player.areaId;
     },
     onAreaClick: (id) => {
-      uiState.focusedAreaId = id;
-      planMoveTo(id);
+      // sempre inspeciona
+      setFocus(id);
+
+      // só permite mover após Commit Action
+      if (world.turnDraft?.phase !== "MOVE") return;
+
+      const draft = world.turnDraft;
+      const maxSteps = 3;
+      const route = draft.route || (draft.route = []);
+
+      // área de origem para validar adjacência é a última da rota ou a atual do player
+      const from = route.length ? route[route.length - 1] : world.entities.player.areaId;
+      const adj = world.map.adjById[String(from)] || [];
+      const canStep = (id !== from) && adj.includes(id) && route.length < maxSteps;
+
+      if(!canStep) return;
+
+      // aplica movimentação imediatamente para refletir no inspector
+      world.entities.player.areaId = id;
+      route.push(id);
+
+      // revela ao explorar
+      const v = new Set(world.flags.visitedAreas || []);
+      v.add(1);
+      v.add(id);
+      world.flags.visitedAreas = Array.from(v).sort((a,b)=>a-b);
+
+      saveToLocal(world);
       sync();
     }
   });
@@ -320,41 +352,10 @@ function finalizeDay(){
 }
 
   function sync(){
-    if(!world) return;
-
-    dayEl.textContent = String(world.meta.day);
-    seedEl.textContent = String(world.meta.seed);
-
-    const p = world.entities.player;
-
-    const dInfo = DISTRICT_INFO[p.district] || {};
-    youDistrict.textContent = `${districtTag(p.district)} • ${dInfo.name || ""}`;
-    youHP.textContent = String(p.hp ?? 100);
-    youFP.textContent = String(p.fp ?? 70);
-    youKills.textContent = String(p.kills ?? 0);
-    youVisited.textContent = String(world.flags.visitedAreas.length);
-    youSteps.textContent = String(maxSteps(p));
-
-    visitedCount.textContent = `Visited: ${world.flags.visitedAreas.length}`;
-
-    const focus = uiState.focusedAreaId;
-    const a = world.map.areasById[String(focus)];
-    const visited = world.flags.visitedAreas.includes(focus);
-
-    title.textContent = (focus === 1) ? `Area 1 (🏺 Cornucopia)` : `Area ${focus}`;
-    swatch.style.background = (visited ? (a?.color || "#2a2f3a") : "#2a2f3a");
-
-    infoNum.textContent = String(focus);
-    infoBiome.textContent = visited ? (a?.biome || "—") : "Unknown";
-    infoWater.textContent = visited ? ((a?.hasWater) ? "Yes" : "No") : "Unknown";
-    infoVisited.textContent = visited ? "Yes" : "No";
-    infoPlan.textContent = uiState.plannedRoute.length ? uiState.plannedRoute.join(" → ") : "—";
-
-    if(commitBtn){
-      if(uiState.pendingAction1){
-        const label = uiState.pendingAction1.type === "ATTACK" ? "Attack" : uiState.pendingAction1.type === "DEFEND" ? "Defend" : "Do nothing";
-        commitBtn.textContent = `Action 1: ${label} • Move on map`;
-      } else {
+    mapUI.setData({ world, paletteIndex });
+    setFocus(focusedId);
+    updateUiState();
+  } else {
         commitBtn.textContent = "Commit Action 1";
       }
     }
@@ -519,3 +520,181 @@ function escapeHtml(s){
 }
 
 renderStart();
+  function showModal({ title, bodyHtml, buttons }){
+    const overlay = document.createElement("div");
+    overlay.className = "modalOverlay";
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="h1">${title}</div>
+        <div class="muted small" style="margin-bottom:10px;">${bodyHtml || ""}</div>
+        <div class="row">
+          ${(buttons || []).map((b,i)=> `<button data-i="${i}" class="btn ${b.className || ""}">${b.label}</button>`).join("")}
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const btns = overlay.querySelectorAll("button[data-i]");
+    btns.forEach(btn => {
+      btn.onclick = () => {
+        const i = Number(btn.getAttribute("data-i"));
+        const cfg = buttons[i];
+        if(cfg?.onClick) cfg.onClick();
+        overlay.remove();
+      };
+    });
+  }
+
+  function showDialog({ title, lines, autoCloseMs=5000 }){
+    const overlay = document.createElement("div");
+    overlay.className = "modalOverlay";
+    const htmlLines = (lines || []).map(l => `<div style="margin:6px 0;">${escapeHtml(l)}</div>`).join("");
+    overlay.innerHTML = `
+      <div class="modal dialog">
+        <div class="h1">${title}</div>
+        <div class="muted small">${htmlLines}</div>
+        <div class="row" style="margin-top:12px;">
+          <button id="ok" class="btn">OK</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector("#ok").onclick = () => overlay.remove();
+    if(autoCloseMs){
+      setTimeout(() => { if(document.body.contains(overlay)) overlay.remove(); }, autoCloseMs);
+    }
+  }
+
+  function escapeHtml(str){
+    return String(str)
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#039;");
+  }
+
+  function resetTurnDraftForNewDay(){
+    world.turnDraft = {
+      phase: "ACTION", // ACTION -> MOVE
+      actionType: null,
+      route: []
+    };
+  }
+
+  function updateUiState(){
+    dayEl.textContent = String(world.meta.day);
+    seedEl.textContent = String(world.meta.seed);
+    visitedCount.textContent = `Visitadas: ${world.flags.visitedAreas.length}`;
+
+    const used = world.turnDraft?.route?.length || 0;
+    const rem = Math.max(0, 3 - used);
+    movesLeftEl.textContent = `Você pode se mover até 3 áreas hoje. Restantes: ${rem}`;
+
+    if(world.turnDraft?.phase === "ACTION"){
+      bannerEl.textContent = "Você deve fazer uma ação nesta área antes de se mover para a próxima.";
+      commitBtn.style.display = "";
+      endBtn.style.display = "none";
+    } else {
+      bannerEl.textContent = "Você sobreviveu mais um dia. Escolha uma nova área para ir.";
+      commitBtn.style.display = "none";
+      endBtn.style.display = "";
+    }
+
+    const lines = [];
+    lines.push(`Player: área ${world.entities.player.areaId}`);
+    for(const npc of Object.values(world.entities.npcs)){
+      lines.push(`${npc.name}: área ${npc.areaId}`);
+    }
+    entityLocsEl.value = lines.join("\n");
+  }
+
+  commitBtn.onclick = () => {
+    showModal({
+      title: "Commit Action",
+      bodyHtml: "Escolha uma ação para esta área.",
+      buttons: [
+        { label: "Atacar", className: "btn-action", onClick: () => commitActionType("ATTACK") },
+        { label: "Defender", onClick: () => commitActionType("DEFEND") },
+        { label: "Nothing", onClick: () => commitActionType("DO_NOTHING") },
+      ]
+    });
+  };
+
+  function commitActionType(type){
+    const { nextWorld, actionEvents } = commitPlayerAction(world, type);
+    world = nextWorld;
+
+    world.turnDraft.actionType = type;
+    world.turnDraft.phase = "MOVE";
+
+    // feedback dialog
+    const lines = [];
+    const you = "player";
+    const hits = (actionEvents || []).filter(e => e.type === "HIT" && (e.attacker === you || e.target === you));
+    const deaths = (actionEvents || []).filter(e => e.type === "DEATH");
+    const action = (actionEvents || []).find(e => e.type === "ACTION");
+
+    if(action?.action === "ATTACK"){
+      if(action.result === "no_target") lines.push("You attacked, but there was no one here.");
+      else lines.push("You attacked.");
+    } else if(action?.action === "DEFEND"){
+      lines.push("You defended.");
+    } else {
+      lines.push("You did nothing.");
+    }
+
+    if(hits.length === 0){
+      lines.push("Nothing happened.");
+    } else {
+      for(const h of hits){
+        if(h.attacker === you){
+          lines.push(`You dealt ${h.dmg} damage.`);
+        } else if(h.target === you){
+          lines.push(`You received ${h.dmg} damage.`);
+        }
+      }
+    }
+
+    const youDied = deaths.some(d => d.who === you);
+    if(youDied) lines.push("You died.");
+
+    showDialog({ title: "Action result", lines, autoCloseMs: 5000 });
+
+    saveToLocal(world);
+    sync();
+  }
+
+  endBtn.onclick = () => {
+    // end day in current position
+    const { nextWorld } = simEndDay(world);
+    world = nextWorld;
+    resetTurnDraftForNewDay();
+    saveToLocal(world);
+    renderGame();
+  };
+
+  document.getElementById("regen").onclick = () => startNewGame(world.meta.mapSize);
+  document.getElementById("resetProgress").onclick = () => {
+    world.flags.visitedAreas = [1];
+    world.entities.player.areaId = 1;
+    focusedId = 1;
+    resetTurnDraftForNewDay();
+    saveToLocal(world);
+    sync();
+  };
+  document.getElementById("saveLocal").onclick = () => { saveToLocal(world); alert("Salvo no navegador."); };
+  document.getElementById("export").onclick = () => downloadJSON(world);
+  document.getElementById("import").onchange = async (e) => {
+    const file = e.target.files?.[0];
+    if(!file) return;
+    try{
+      const loaded = await uploadJSON(file);
+      world = loaded;
+      if(!world.turnDraft) resetTurnDraftForNewDay();
+      saveToLocal(world);
+      renderGame();
+    } catch(err){ alert(err.message || "Falha ao importar."); }
+  };
+  document.getElementById("clearLocal").onclick = () => { clearLocal(); alert("Save apagado."); };
+
+

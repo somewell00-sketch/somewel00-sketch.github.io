@@ -90,11 +90,12 @@ function drawSafeLabel(ctx, poly, label, isEmoji){
 }
 
 export class MapUI {
-  constructor({ canvas, onAreaClick, getCurrentAreaId }){
+  constructor({ canvas, onAreaClick, getCurrentAreaId, isMovementEnabled }){
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
     this.onAreaClick = onAreaClick;
     this.getCurrentAreaId = getCurrentAreaId || (() => (this.world?.entities?.player?.areaId ?? 1));
+    this.isMovementEnabled = isMovementEnabled || (() => true);
 
     this.hoveredId = null;
 
@@ -111,6 +112,7 @@ export class MapUI {
   }
 
   isVisitable(areaId){
+    if(!this.isMovementEnabled()) return false;
     const cur = this.getCurrentAreaId();
     if (areaId === cur) return true;
     const adj = this.world.map.adjById[String(cur)] || [];
