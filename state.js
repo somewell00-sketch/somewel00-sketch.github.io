@@ -87,7 +87,6 @@ export function cloneWorld(world){
 }
 
 
-// Utility: returns an array with player + all NPC tributes
 export function getAllActors(world){
   return [world.entities.player, ...Object.values(world.entities.npcs)];
 }
