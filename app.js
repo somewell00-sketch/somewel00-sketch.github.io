@@ -212,10 +212,8 @@ function renderGame(){
   const endBtn = document.getElementById("endDay");
   const movesLeftEl = document.getElementById("movesLeft");
   const entityLocsEl = document.getElementById("entityLocs");
-  const entityLocsEl = document.getElementById("entityLocs");
   const occupantsEl = document.getElementById("occupants");
   const debugTributes = document.getElementById("debugTributes");
-  const commitBtn = document.getElementById("commit");
 
   const infoNum = document.getElementById("infoNum");
   const infoBiome = document.getElementById("infoBiome");
@@ -298,7 +296,6 @@ function renderGame(){
   if(uiState.plannedRoute.length >= stepsAllowed) return;
 
   // Must be adjacent
-  const adj = world.map.adjById[String(currentPos)] || [];
   if(!adj.includes(id)) return;
 
   // Water rule: cannot enter water without bridge
@@ -433,7 +430,6 @@ function finalizeDay(){
   sync();
 
   function openCommitModal(){
-    const p = world.entities.player;
 
     const sameAreaNpcs = Object.values(world.entities.npcs).filter(n => n.areaId === p.areaId && (n.hp ?? 0) > 0);
     const canAttack = sameAreaNpcs.length > 0;
@@ -520,7 +516,6 @@ function escapeHtml(s){
 
 renderStart();
   function showModal({ title, bodyHtml, buttons }){
-    const overlay = document.createElement("div");
     overlay.className = "modalOverlay";
     overlay.innerHTML = `
       <div class="modal">
@@ -544,7 +539,6 @@ renderStart();
   }
 
   function showDialog({ title, lines, autoCloseMs=5000 }){
-    const overlay = document.createElement("div");
     overlay.className = "modalOverlay";
     const htmlLines = (lines || []).map(l => `<div style="margin:6px 0;">${escapeHtml(l)}</div>`).join("");
     overlay.innerHTML = `
@@ -627,7 +621,6 @@ renderStart();
     world.turnDraft.phase = "MOVE";
 
     // feedback dialog
-    const lines = [];
     const you = "player";
     const hits = (actionEvents || []).filter(e => e.type === "HIT" && (e.attacker === you || e.target === you));
     const deaths = (actionEvents || []).filter(e => e.type === "DEATH");
@@ -665,7 +658,6 @@ renderStart();
 
   endBtn.onclick = () => {
     // end day in current position
-    const { nextWorld } = simEndDay(world);
     world = nextWorld;
     resetTurnDraftForNewDay();
     saveToLocal(world);
@@ -684,7 +676,6 @@ renderStart();
   document.getElementById("saveLocal").onclick = () => { saveToLocal(world); alert("Salvo no navegador."); };
   document.getElementById("export").onclick = () => downloadJSON(world);
   document.getElementById("import").onchange = async (e) => {
-    const file = e.target.files?.[0];
     if(!file) return;
     try{
       const loaded = await uploadJSON(file);
@@ -695,4 +686,3 @@ renderStart();
     } catch(err){ alert(err.message || "Falha ao importar."); }
   };
   document.getElementById("clearLocal").onclick = () => { clearLocal(); alert("Save apagado."); };
-
