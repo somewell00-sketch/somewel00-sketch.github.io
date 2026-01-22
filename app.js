@@ -1,4 +1,3 @@
-im
 function startMovePhase(){
   uiState.phase = "MOVE";
   uiState.moveRoute = [];
