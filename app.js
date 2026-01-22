@@ -32,7 +32,7 @@ function endDay(){
 
   sync();
 }
-port { MapSize, createInitialWorld } from "./state.js";
+import { MapSize, createInitialWorld } from "./state.js";
 import { generateMapData } from "./mapgen.js";
 import { MapUI } from "./mapui.js";
 import { advanceDay, applyAction1Phase, endDayMaintenance } from "./sim.js";
