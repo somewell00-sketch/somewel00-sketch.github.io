@@ -1,10 +1,4 @@
 :root{
-  --action:#c25a2b;
-  --action2:#d06a38;
-  --endday:#1ea6a2;
-  --endday2:#25b6b1;
-  --overlay:rgba(0,0,0,0.55);
-
   --bg: #111113;           /* Ebony */
   --panel: #2b1512;        /* near Carafe */
   --card: #1a1413;
@@ -181,45 +175,3 @@ textarea{
 
 .list{ display:flex; flex-direction:column; gap:8px; margin:8px 0 0; }
 .pill strong{ margin-right:auto; }
-
-.btn-action{
-  background: var(--action);
-  border-color: rgba(255,255,255,.14);
-}
-.btn-action:hover{ background: var(--action2); }
-
-.btn-endday{
-  background: var(--endday);
-  border-color: rgba(255,255,255,.14);
-}
-.btn-endday:hover{ background: var(--endday2); }
-
-.modalOverlay{
-  position:fixed;
-  inset:0;
-  background: var(--overlay);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding: 18px;
-  z-index: 50;
-}
-.modal{
-  width: min(420px, 100%);
-  background: linear-gradient(180deg, var(--panel), var(--panel2));
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 14px;
-}
-.modal .h1{ margin-bottom: 8px; }
-.modal .row{ justify-content:flex-end; }
-.modal .opt{
-  display:flex;
-  flex-direction:column;
-  gap: 8px;
-  margin: 10px 0 12px;
-}
-.modal .opt button{ width:100%; }
-.dialog{
-  width: min(520px, 100%);
-}

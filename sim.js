@@ -37,99 +37,6 @@ export function isRouteValid(world, fromAreaId, route, entity){
   return { ok:true, finalAreaId: cur };
 }
 
-export function commitPlayerAction(world, actionType){
-  // actionType: "ATTACK" | "DEFEND" | "DO_NOTHING"
-  const next = cloneWorld(world);
-  const events = [];
-
-  const player = next.entities.player;
-  const areaId = player.areaId;
-
-  const npcsHere = Object.values(next.entities.npcs).filter(n => (n.hp ?? 0) > 0 && n.areaId === areaId);
-
-  // Build intents for this action phase only (player + NPCs in same area)
-  const decl = {};
-  decl.player = { type: actionType };
-
-  // NPCs: if they are here, 60% chance to attack player, else defend
-  for(const npc of npcsHere){
-    const r = Math.random();
-    if(r < 0.60){
-      decl[npc.id] = { type: "ATTACK", targetId: "player" };
-    } else {
-      decl[npc.id] = { type: "DEFEND" };
-    }
-  }
-
-  // Resolve
-  if(actionType === "ATTACK"){
-    if(npcsHere.length === 0){
-      events.push({ type:"ACTION", who:"player", action:"ATTACK", result:"no_target" });
-    } else {
-      // choose first target for MVP
-      const target = npcsHere[0];
-      events.push({ type:"ACTION", who:"player", action:"ATTACK", target: target.id });
-      applyDamage(next, player, target, 5, { player:{}, [target.id]:{} }, events);
-    }
-  } else if(actionType === "DEFEND"){
-    events.push({ type:"ACTION", who:"player", action:"DEFEND" });
-    // if any npc attacks, apply reduced damage
-    for(const npc of npcsHere){
-      const d = decl[npc.id];
-      if(d?.type === "ATTACK" && d.targetId === "player"){
-        applyDamage(next, npc, player, 5, { player:{ defend:true }, [npc.id]:{} }, events);
-      }
-    }
-  } else {
-    events.push({ type:"ACTION", who:"player", action:"DO_NOTHING" });
-    // NPCs may still attack
-    for(const npc of npcsHere){
-      const d = decl[npc.id];
-      if(d?.type === "ATTACK" && d.targetId === "player"){
-        applyDamage(next, npc, player, 5, { player:{}, [npc.id]:{} }, events);
-      }
-    }
-  }
-
-  return { nextWorld: next, actionEvents: events };
-}
-
-export function endDay(world){
-  // NPC movement + maintenance + day advance. No extra combat in MVP.
-  const next = cloneWorld(world);
-  const day = next.meta.day;
-  const events = [];
-
-  // closures
-  applyClosuresForDay(next, day);
-
-  // NPC intents: move or stay
-  for(const npc of Object.values(next.entities.npcs)){
-    if((npc.hp ?? 0) <= 0) continue;
-    const adj = next.map.adjById[String(npc.areaId)] || [];
-    if(adj.length === 0) continue;
-    const idx = Math.floor(Math.random() * adj.length);
-    const toAreaId = adj[idx];
-    applyMove(next, npc.id, { toAreaId }, events);
-  }
-
-  // maintenance
-  for(const e of [next.entities.player, ...Object.values(next.entities.npcs)]){
-    if((e.hp ?? 0) <= 0) continue;
-    const inCorn = (e.areaId === 1);
-    if(inCorn){
-      e.fp = 70;
-    } else {
-      e.fp = (e.fp ?? 70) - 10;
-    }
-  }
-
-  next.meta.day += 1;
-  next.log.days.push({ day, events });
-
-  return { nextWorld: next, dayEvents: events };
-}
-
 export function advanceDay(world, actions = []){
   const next = cloneWorld(world);
   const day = next.meta.day;
@@ -201,54 +108,34 @@ function applyMove(world, who, payload, events){
   if(!entity) return;
 
   const from = entity.areaId;
-  const route = Array.isArray(payload?.route)
-    ? payload.route.map(Number)
-    : (payload?.toAreaId != null ? [Number(payload.toAreaId)] : []);
+  const route = Array.isArray(payload.route) ? payload.route.map(Number)
+    : (payload.toAreaId != null ? [Number(payload.toAreaId)] : []);
 
   if(route.length === 0){
     events.push({ type: "MOVE_BLOCKED", who, from, reason: "empty_route" });
     return;
   }
 
-  // apply step-by-step, but stop at maxSteps
-  const maxS = maxSteps(entity);
-  let cur = from;
-  let steps = 0;
-  const taken = [];
-
-  for(const toRaw of route){
-    if(steps >= maxS) break;
-    const to = Number(toRaw);
-    if(!isAreaActive(world, to)){
-      events.push({ type: "MOVE_BLOCKED", who, from: cur, to, reason: "area_closed" });
-      break;
-    }
-    if(!isAdjacent(world, cur, to)){
-      events.push({ type: "MOVE_BLOCKED", who, from: cur, to, reason: "not_adjacent" });
-      break;
-    }
-    const dest = world.map.areasById[String(to)];
-    if(dest?.hasWater && !dest?.hasBridge){
-      events.push({ type: "MOVE_BLOCKED", who, from: cur, to, reason: "water_no_bridge" });
-      break;
-    }
-    cur = to;
-    taken.push(to);
-    steps += 1;
-  }
-
-  if(taken.length === 0){
-    // already pushed MOVE_BLOCKED for invalid first step
+  if(!isAreaActive(world, from)){
+    events.push({ type: "MOVE_BLOCKED", who, from, reason: "start_area_closed" });
     return;
   }
 
-  entity.areaId = cur;
-  events.push({ type: "MOVE", who, from, to: cur, route: taken });
+  const res = isRouteValid(world, from, route, entity);
+  if(!res.ok){
+    events.push({ type: "MOVE_BLOCKED", who, from, to: route[0], reason: res.reason, details: res });
+    return;
+  }
+
+  const to = res.finalAreaId;
+  entity.areaId = to;
+  stepsTaken[entity.id] = used + 1;
+  events.push({ type: "MOVE", who, from, to, route });
 
   if(who === "player"){
     const v = new Set(world.flags.visitedAreas || []);
     v.add(1);
-    for(const t of taken) v.add(t);
+    v.add(to);
     world.flags.visitedAreas = Array.from(v).sort((a,b)=>a-b);
   }
 }
