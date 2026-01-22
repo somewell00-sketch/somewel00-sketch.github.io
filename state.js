@@ -671,7 +671,8 @@ function randomAttrs7(rng){
     const j = Math.floor(rng.next() * (i+1));
     const t = arr[i]; arr[i]=arr[j]; arr[j]=t;
   }
-  return { F: arr[0], D: arr[1], P: arr[2] };
+  return {
+    turnDraft: null, F: arr[0], D: arr[1], P: arr[2] };
 }
 
 export function cloneWorld(world){

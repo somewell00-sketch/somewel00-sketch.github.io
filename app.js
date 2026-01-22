@@ -114,6 +114,12 @@ function startNewGame(mapSize, totalPlayers, playerDistrict){
 }
 
 function renderGame(){
+  world.turnDraft = {
+    stance: null,
+    route: [],
+    maxSteps: 3,
+    committed: false
+  };
   root.innerHTML = `
     <div class="app">
       <aside class="panel">
