@@ -14,16 +14,29 @@ function renderStart(){
     <div class="screen">
       <div class="card">
         <div class="h1">Arena</div>
-        <div class="muted">Escolha o tamanho do mapa e entre na arena. O motor roda por dias e é determinístico por seed.</div>
+        <div class="muted">Choose your setup and enter the arena. O motor roda por dias e é determinístico por seed.</div>
         <hr class="sep" />
         <div class="row">
-          <label class="muted">Tamanho</label>
+          <label class="muted">Map size</label>
           <select id="size" class="select">
-            <option value="${MapSize.SMALL}">Pequena (24 áreas)</option>
-            <option value="${MapSize.MEDIUM}" selected>Média (48 áreas)</option>
-            <option value="${MapSize.LARGE}">Grande (72 áreas)</option>
+            <option value="${MapSize.SMALL}">Small (24 areas)</option>
+            <option value="${MapSize.MEDIUM}" selected>Medium (48 areas)</option>
+            <option value="${MapSize.LARGE}">Large (72 areas)</option>
           </select>
-          <button id="enter" class="btn">Entrar na arena</button>
+
+          <label class="muted">Players</label>
+          <select id="players" class="select">
+            <option value="12" selected>12</option>
+            <option value="24">24</option>
+            <option value="48">48</option>
+          </select>
+
+          <label class="muted">Your district</label>
+          <select id="district" class="select">
+            ${Array.from({length:12}, (_,i)=>`<option value="${i+1}">District ${i+1}</option>`).join("")}
+          </select>
+
+          <button id="enter" class="btn">Enter arena</button>
           <button id="resume" class="btn">Continuar save</button>
         </div>
         <div class="muted small" style="margin-top:10px;">
@@ -49,7 +62,7 @@ function renderStart(){
   };
 }
 
-function startNewGame(mapSize){
+function startNewGame(mapSize, totalPlayers, playerDistrict){
   const seed = (Math.random() * 1e9) | 0;
   const mapData = generateMapData({
     seed,
@@ -59,7 +72,7 @@ function startNewGame(mapSize){
     paletteIndex
   });
 
-  world = createInitialWorld({ seed, mapSize, mapData, npcCount: 6 });
+  world = createInitialWorld({ seed, mapSize, mapData, totalPlayers, playerDistrict });
   saveToLocal(world);
   renderGame();
 }
@@ -95,9 +108,13 @@ function renderGame(){
           <span class="pill" id="visitedCount">Visitadas: —</span>
         </div>
 
-        <div class="kv">
+        
+        <div class="muted">Occupants</div>
+        <div id="occupants" class="list"></div>
+
+<div class="kv">
           <div>Número</div><div id="infoNum">—</div>
-          <div>Biome</div><div id="infoBiome">—</div>
+          <div>Bioma</div><div id="infoBiome">—</div>
           <div>Cor</div><div id="infoColor">—</div>
           <div>Água</div><div id="infoWater">—</div>
           <div>Visitada</div><div id="infoVisited">—</div>
@@ -202,7 +219,7 @@ function renderGame(){
 
   document.getElementById("regen").onclick = () => {
     // novo mapa (mantém meta/day? aqui vou resetar jogo)
-    startNewGame(world.meta.mapSize);
+    startNewGame(world.meta.mapSize, world.meta.totalPlayers || 12, world.entities.player.district || 12);
   };
 
   document.getElementById("resetProgress").onclick = () => {
@@ -250,3 +267,13 @@ function renderGame(){
 }
 
 renderStart();
+
+
+function escapeHtml(s){
+  return String(s)
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
