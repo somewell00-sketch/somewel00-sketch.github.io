@@ -398,19 +398,6 @@ function renderGame(){
   const confirmYes = document.getElementById("confirmYes");
   const confirmNo = document.getElementById("confirmNo");
 
-  const youHpEl = document.getElementById("youHp");
-  const youFpEl = document.getElementById("youFp");
-  const invCountEl = document.getElementById("invCount");
-  const invPillsEl = document.getElementById("invPills");
-
-  const groundItemWrap = document.getElementById("groundItemWrap");
-  const groundItemLabel = document.getElementById("groundItemLabel");
-
-  const confirmModal = document.getElementById("confirmModal");
-  const confirmText = document.getElementById("confirmText");
-  const confirmYes = document.getElementById("confirmYes");
-  const confirmNo = document.getElementById("confirmNo");
-
   const areaInfoEl = document.getElementById("areaInfo");
 
   const canvas = document.getElementById("c");
