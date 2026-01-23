@@ -45,38 +45,44 @@ function renderStart(){
     <div class="screen">
       <div class="card">
         <div class="h1">Arena Simulator</div>
-        <div class="muted">Você começa na Cornucopia (Área 1). Todo dia: primeiro Commit Action, depois você pode se mover (até 3 áreas adjacentes) e encerrar com End Day.</div>
+        <div class="muted">You start at the Cornucopia (Area 1). Each day: first commit an action, then you can move (up to 3 adjacent areas) and finish with End Day.</div>
         <hr class="sep" />
 
-        <div class="h2" style="margin:0 0 6px 0;">Atributos do seu jogador (7 pontos)</div>
-        <div class="muted small" style="margin-bottom:10px;">Distribua entre Força (iniciativa), Destreza (itens) e Percepção (ameaças). Sem negativos. Precisa somar 7.</div>
+        <div class="h2" style="margin:0 0 6px 0;">Your attributes (7 points)</div>
+        <div class="muted small" style="margin-bottom:10px;">Allocate 7 points across Strength (S), Dexterity (D), and Perception (P). No negatives.</div>
 
-        <div class="attrGrid">
-          <div class="attrCol">
-            <div class="muted small">Força</div>
-            <div class="attrValue"><span id="attrFVal">3</span></div>
-            <input id="attrF" class="vSlider" type="range" min="0" max="7" step="1" value="3" />
-            <div class="muted small">0 — 7</div>
-          </div>
-          <div class="attrCol">
-            <div class="muted small">Destreza</div>
-            <div class="attrValue"><span id="attrDVal">2</span></div>
-            <input id="attrD" class="vSlider" type="range" min="0" max="7" step="1" value="2" />
-            <div class="muted small">0 — 7</div>
-          </div>
-          <div class="attrCol">
-            <div class="muted small">Percepção</div>
-            <div class="attrValue"><span id="attrPVal">2</span></div>
-            <input id="attrP" class="vSlider" type="range" min="0" max="7" step="1" value="2" />
-            <div class="muted small">0 — 7</div>
+        <div class="attrStack">
+          <div class="attrRow">
+            <div class="attrRowLabel"><span class="attrName">Strength</span> <span class="muted">(S)</span></div>
+            <div class="attrRowMin">0</div>
+            <input id="attrF" class="hSlider" type="range" min="0" max="7" step="1" value="3" aria-label="Strength" />
+            <div class="attrRowMax">7</div>
+            <div class="attrRowVal" id="attrFVal">3</div>
           </div>
 
-          <div class="attrSummary">
-            <div class="muted small">Total</div>
-            <div id="attrTotal" class="h2" style="margin:0;">7 / 7</div>
-            <div id="attrHint" class="muted small">—</div>
-            <div class="muted small" style="margin-top:10px;">Dica: quando o total estiver em 7, você só consegue aumentar um atributo se reduzir outro.</div>
+          <div class="attrRow">
+            <div class="attrRowLabel"><span class="attrName">Dexterity</span> <span class="muted">(D)</span></div>
+            <div class="attrRowMin">0</div>
+            <input id="attrD" class="hSlider" type="range" min="0" max="7" step="1" value="2" aria-label="Dexterity" />
+            <div class="attrRowMax">7</div>
+            <div class="attrRowVal" id="attrDVal">2</div>
           </div>
+
+          <div class="attrRow">
+            <div class="attrRowLabel"><span class="attrName">Perception</span> <span class="muted">(P)</span></div>
+            <div class="attrRowMin">0</div>
+            <input id="attrP" class="hSlider" type="range" min="0" max="7" step="1" value="2" aria-label="Perception" />
+            <div class="attrRowMax">7</div>
+            <div class="attrRowVal" id="attrPVal">2</div>
+          </div>
+
+          <div class="attrTotalRow">
+            <div class="attrTotalLabel">Total</div>
+            <div id="attrTotal" class="attrTotalValue">7 / 7</div>
+            <div id="attrHint" class="attrTotalHint">OK</div>
+          </div>
+
+          <div class="muted small" style="margin-top:10px;">Tip: when the total is 7, you can only increase one attribute after reducing another.</div>
         </div>
 
         <hr class="sep" />
@@ -160,7 +166,7 @@ function renderStart(){
       enterBtn.disabled = false;
     } else {
       const diff = 7 - sum;
-      hintEl.textContent = diff > 0 ? `Faltam ${diff} ponto(s)` : `Remova ${Math.abs(diff)} ponto(s)`;
+      hintEl.textContent = diff > 0 ? `Missing ${diff}` : `Reduce ${Math.abs(diff)}`;
       enterBtn.disabled = true;
     }
     updateLabels(v);
@@ -635,11 +641,11 @@ function renderGame(){
     overlay.className = "modalOverlay";
     overlay.innerHTML = `
       <div class="modal">
-        <div class="h1" style="margin:0;">Resultado da ação</div>
-        <div class="muted small" style="margin-top:6px;">O que aconteceu:</div>
+        <div class="h1" style="margin:0;">Action result</div>
+        <div class="muted small" style="margin-top:6px;">What happened:</div>
 
         <div class="eventList">
-          ${lines.length ? lines.map(l => `<div class="eventLine">${escapeHtml(l)}</div>`).join("") : `<div class="muted small">Nada aconteceu.</div>`}
+          ${lines.length ? lines.map(l => `<div class="eventLine">${escapeHtml(l)}</div>`).join("") : `<div class="muted small">Nothing happened.</div>`}
         </div>
 
         <div class="row" style="margin-top:14px; justify-content:flex-end;">
@@ -659,7 +665,7 @@ function renderGame(){
   function formatEvents(events){
     const p = world?.entities?.player;
     const npcName = (id) => {
-      if(id === "player") return "Você";
+      if(id === "player") return "You";
       const n = world?.entities?.npcs?.[id];
       return n?.name || id;
     };
@@ -668,30 +674,30 @@ function renderGame(){
     for(const e of (events || [])){
       if(e.type === "ATTACK"){
         if(e.ok){
-          out.push(`Você atacou ${npcName(e.target)} e causou ${e.dmgDealt} de dano.`);
+          out.push(`You attacked ${npcName(e.target)} and dealt ${e.dmgDealt} damage.`);
         } else {
-          out.push("Você tentou atacar, mas não havia alvo válido.");
+          out.push("You tried to attack, but there was no valid target.");
         }
       } else if(e.type === "DEFEND"){
-        out.push("Você se defendeu.");
-        if(e.note === "nothing_happened") out.push("Nada aconteceu.");
+        out.push("You defended.");
+        if(e.note === "nothing_happened") out.push("Nothing happened.");
       } else if(e.type === "NOTHING"){
-        out.push("Você não fez nada.");
-        if(e.note) out.push("Nada aconteceu.");
+        out.push("You did nothing.");
+        if(e.note) out.push("Nothing happened.");
       } else if(e.type === "MOVE"){
-        out.push(`Você se moveu da área ${e.from} para a área ${e.to}.`);
+        out.push(`You moved from Area ${e.from} to Area ${e.to}.`);
       } else if(e.type === "DAMAGE_RECEIVED"){
         if(e.from === "hazard"){
-          if(e.reducedFrom != null) out.push(`Você recebeu ${e.dmg} de dano do ambiente (reduzido de ${e.reducedFrom}).`);
-          else out.push(`Você recebeu ${e.dmg} de dano do ambiente.`);
+          if(e.reducedFrom != null) out.push(`You took ${e.dmg} environmental damage (reduced from ${e.reducedFrom}).`);
+          else out.push(`You took ${e.dmg} environmental damage.`);
         } else {
-          out.push(`Você recebeu ${e.dmg} de dano de ${npcName(e.from)}.`);
+          out.push(`You took ${e.dmg} damage from ${npcName(e.from)}.`);
         }
       } else if(e.type === "DEATH"){
-        if(e.who === "player") out.push("Você morreu.");
-        else out.push(`${npcName(e.who)} morreu.`);
+        if(e.who === "player") out.push("You died.");
+        else out.push(`${npcName(e.who)} died.`);
       } else if(e.type === "ARRIVAL"){
-        out.push(`${npcName(e.who)} chegou na sua área (Area ${e.to}).`);
+        out.push(`${npcName(e.who)} arrived in your area (Area ${e.to}).`);
       }
     }
     return out;
@@ -713,13 +719,13 @@ function renderGame(){
     overlay.className = "modalOverlay";
     overlay.innerHTML = `
       <div class="modal">
-        <div class="h1" style="margin:0;">Fim do dia</div>
-        <div class="muted small" style="margin-top:6px;">Resumo do que aconteceu enquanto o dia encerrava.</div>
+        <div class="h1" style="margin:0;">End of day</div>
+        <div class="muted small" style="margin-top:6px;">Summary of what happened as the day ended.</div>
 
         <div class="eventList" style="margin-top:12px;">
-          <div class="eventLine"><strong>Sua área:</strong> Area ${pArea}</div>
-          <div class="eventLine"><strong>Quem está na sua área agora:</strong> ${hereNow.length ? escapeHtml(hereNow.join(", ")) : "Ninguém"}</div>
-          <div class="eventLine"><strong>Quem foi para a sua área hoje:</strong> ${arrivals.length ? escapeHtml(arrivals.map(a => npcName(a.who)).join(", ")) : "Ninguém"}</div>
+          <div class="eventLine"><strong>Your area:</strong> Area ${pArea}</div>
+          <div class="eventLine"><strong>Who is in your area right now:</strong> ${hereNow.length ? escapeHtml(hereNow.join(", ")) : "Nobody"}</div>
+          <div class="eventLine"><strong>Who came to your area today:</strong> ${arrivals.length ? escapeHtml(arrivals.map(a => npcName(a.who)).join(", ")) : "Nobody"}</div>
         </div>
 
         <div class="row" style="margin-top:14px; justify-content:flex-end;">
