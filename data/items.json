@@ -331,7 +331,7 @@
     "type": "consumable",
     "name": "Wild Fruits",
     "icon": "🍓",
-    "description": "Restores 10 HP immediately when collected.",
+    "description": "Restores 10 FP immediately when collected.",
     "damage": null,
     "uses": 1,
     "stackable": false,
@@ -339,7 +339,7 @@
     "requirements": {},
     "effects": {
       "autoConsumeOnCollect": true,
-      "healHP": 10
+      "restoreFP": 10
     }
   },
   "edible_roots": {
@@ -347,7 +347,7 @@
     "type": "consumable",
     "name": "Edible Roots",
     "icon": "🥕",
-    "description": "Restores 15 HP immediately when collected.",
+    "description": "Restores 15 FP immediately when collected.",
     "damage": null,
     "uses": 1,
     "stackable": false,
@@ -355,7 +355,7 @@
     "requirements": {},
     "effects": {
       "autoConsumeOnCollect": true,
-      "healHP": 15
+      "restoreFP": 15
     }
   },
   "freshwater_fish": {
@@ -363,7 +363,7 @@
     "type": "consumable",
     "name": "Freshwater Fish",
     "icon": "🐟",
-    "description": "Restores 20 HP immediately when collected.",
+    "description": "Restores 20 FP immediately when collected.",
     "damage": null,
     "uses": 1,
     "stackable": false,
@@ -371,7 +371,7 @@
     "requirements": {},
     "effects": {
       "autoConsumeOnCollect": true,
-      "healHP": 20
+      "restoreFP": 20
     }
   },
   "capital_ration": {
@@ -379,7 +379,7 @@
     "type": "consumable",
     "name": "Capital Ration",
     "icon": "🥫",
-    "description": "Restores 40 HP immediately when collected. Rare.",
+    "description": "Restores 40 FP immediately when collected. Rare.",
     "damage": null,
     "uses": 1,
     "stackable": false,
@@ -387,7 +387,7 @@
     "requirements": {},
     "effects": {
       "autoConsumeOnCollect": true,
-      "healHP": 40,
+      "restoreFP": 40,
       "rare": true
     }
   },

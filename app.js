@@ -466,7 +466,10 @@ function renderGame(){
 
       <!-- RIGHT: player inventory + debug -->
       <aside class="panel" id="rightPanel">
-        <div class="h1" style="margin:0;">YOU</div>
+        <div class="h1" style="margin:0; display:flex; align-items:center; gap:8px;">
+          <span>YOU</span>
+          <span id="youPoisonIcon" class="statusIcon hidden" aria-label="Poisoned" data-tooltip="Poisoned">☠️</span>
+        </div>
         <div class="muted small">HP: <span id="youHp"></span> | FP: <span id="youFp"></span></div>
 
         <div class="section" style="margin-top:10px;">
@@ -544,6 +547,7 @@ function renderGame(){
 
   const youHpEl = document.getElementById("youHp");
   const youFpEl = document.getElementById("youFp");
+  const youPoisonIcon = document.getElementById("youPoisonIcon");
   const invCountEl = document.getElementById("invCount");
   const invPillsEl = document.getElementById("invPills");
 
@@ -568,7 +572,7 @@ function renderGame(){
     }
   });
 
-  let pendingConsume = null;
+  let pendingConfirm = null; // { mode: "consume"|"discard", idx }
 
   // Tooltip system: use data-tooltip attributes and render a single styled tooltip.
   let tooltipActive = false;
@@ -609,18 +613,27 @@ function renderGame(){
     if(from && from !== to) hideTooltip();
   });
   confirmNo.onclick = () => {
-    pendingConsume = null;
+    pendingConfirm = null;
     confirmModal.classList.add("hidden");
   };
   confirmYes.onclick = () => {
-    if(!pendingConsume){ confirmModal.classList.add("hidden"); return; }
-    const idx = pendingConsume.idx;
+    if(!pendingConfirm){ confirmModal.classList.add("hidden"); return; }
+    const idx = pendingConfirm.idx;
+    const mode = pendingConfirm.mode;
+    pendingConfirm = null;
+    confirmModal.classList.add("hidden");
+
+    if(mode === "discard"){
+      discardInventoryItem("player", idx);
+      saveToLocal(world);
+      sync();
+      return;
+    }
+
     const res = useInventoryItem(world, "player", idx, "player");
     world = res.nextWorld;
     uiState.dayEvents.push(...(res.events || []));
     saveToLocal(world);
-    pendingConsume = null;
-    confirmModal.classList.add("hidden");
     sync();
     openResultDialog(res.events || []);
   };
@@ -650,6 +663,15 @@ function renderGame(){
 
     uiState.movesUsed += 1;
     uiState.dayEvents.push(...res.events);
+
+    // Creature ambush on enter (immediate popup)
+    const ambush = (res.events || []).find(e => e.type === "CREATURE_ATTACK" && e.target === "player" && e.onEnter);
+    if(ambush){
+      openCreatureAttackDialog(ambush, res.events || []);
+      if((world.entities.player.hp ?? 0) <= 0){
+        openDeathDialog({ reason: "creature" });
+      }
+    }
 
     // reveal the destination immediately (spec: unlocking/revealing on click)
     saveToLocal(world);
@@ -794,10 +816,32 @@ function renderGame(){
     btnCollect.setAttribute("data-tooltip", full ? "Inventory is full. Discard something first." : "Pick up the selected item");
   }
 
+  function discardInventoryItem(who, idx){
+    const ent = (who === "player") ? world.entities.player : world.entities.npcs?.[who];
+    if(!ent) return;
+    const inv = ent.inventory;
+    if(!inv || !Array.isArray(inv.items)) return;
+    const it = inv.items[idx];
+    if(!it) return;
+    const defId = it.defId;
+
+    // Remove the item entry completely.
+    inv.items.splice(idx, 1);
+
+    // If it was equipped, clear the slot.
+    inv.equipped = inv.equipped || {};
+    if(inv.equipped.weaponDefId === defId) inv.equipped.weaponDefId = null;
+    if(inv.equipped.defenseDefId === defId) inv.equipped.defenseDefId = null;
+  }
+
   function renderInventory(){
     const p = world.entities.player;
     youHpEl.textContent = String(p.hp ?? 100);
     youFpEl.textContent = String(p.fp ?? 70);
+    const poisoned = (p.status || []).some(s => s?.type === "poison");
+    if(youPoisonIcon){
+      youPoisonIcon.classList.toggle("hidden", !poisoned);
+    }
     invCountEl.textContent = String(inventoryCount(p.inventory));
 
     const items = p.inventory?.items || [];
@@ -812,16 +856,33 @@ function renderGame(){
       const eq = (weaponEq && it.defId === weaponEq) ? "equipped" : "";
       const de = (defEq && it.defId === defEq) ? "defEquipped" : "";
       const uses = (it.usesLeft != null) ? ` • ${escapeHtml(String(it.usesLeft))} uses` : "";
-      const tip = def ? def.description : "";
       const badge = def?.type === ItemTypes.WEAPON ? `<span class="pillBadge">${escapeHtml(dmg || "")}</span>` : "";
       const stack = qty > 1 ? ` x${escapeHtml(String(qty))}` : "";
       const tooltip = buildItemTooltip(def, it, qty);
-      return `<button class="itemPill ${eq} ${de}" data-idx="${idx}" data-tooltip="${escapeHtml(tooltip)}">
-        <span class="pillIcon" aria-hidden="true">${escapeHtml(getItemIcon(it.defId))}</span>
-        <span class="pillName">${escapeHtml(name)}${stack}</span>
-        ${badge}
-      </button>`;
+      return `<div class="invPillRow">
+        <button class="itemPill ${eq} ${de}" data-idx="${idx}" data-tooltip="${escapeHtml(tooltip)}">
+          <span class="pillIcon" aria-hidden="true">${escapeHtml(getItemIcon(it.defId))}</span>
+          <span class="pillName">${escapeHtml(name)}${stack}</span>
+          ${badge}
+        </button>
+        <button class="pillRemove" data-ridx="${idx}" aria-label="Discard item" data-tooltip="Discard item">✕</button>
+      </div>`;
     }).join("") : `<div class="muted small">Empty</div>`;
+
+    // discard buttons
+    invPillsEl.querySelectorAll(".pillRemove").forEach(btn => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const idx = Number(btn.getAttribute("data-ridx"));
+        const it = items[idx];
+        const def = it ? getItemDef(it.defId) : null;
+        const name = def ? def.name : (it?.defId || "this item");
+        pendingConfirm = { mode: "discard", idx };
+        confirmText.textContent = `Discard ${name}? It will be lost permanently.`;
+        confirmModal.classList.remove("hidden");
+      };
+    });
 
     // interactions
     invPillsEl.querySelectorAll(".itemPill").forEach(btn => {
@@ -845,7 +906,7 @@ function renderGame(){
         }
         if(def.type === ItemTypes.CONSUMABLE){
           // confirm modal
-          pendingConsume = { idx };
+          pendingConfirm = { mode: "consume", idx };
           confirmText.textContent = `Use ${def.name}?`;
           confirmModal.classList.remove("hidden");
           return;
@@ -1243,6 +1304,39 @@ function renderGame(){
     setTimeout(() => { if(document.body.contains(overlay)) close(); }, 5000);
   }
 
+  function openCreatureAttackDialog(attackEvent, events){
+    const creature = attackEvent?.creature || "Unknown Creature";
+    const dmg = Number(attackEvent?.dmg || 0);
+    const poisoned = !!attackEvent?.poisonApplied || (events || []).some(e => e.type === "POISON_APPLIED" && e.who === "player");
+    const dead = (world?.entities?.player?.hp ?? 0) <= 0;
+
+    const overlay = document.createElement("div");
+    overlay.className = "modalOverlay";
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="h1" style="margin:0;">${dead ? "You are dead" : "Ambush"}</div>
+        <div class="muted" style="margin-top:8px;">${escapeHtml(creature)} attacked you. You lost ${escapeHtml(String(dmg))} HP${poisoned ? " and you are poisoned" : ""}.</div>
+        <div class="row" style="margin-top:14px; justify-content:flex-end; gap:8px;">
+          ${dead ? `<button id="restartFromAmbush" class="btn danger">Restart</button>` : `<button id="okAmbush" class="btn primary">OK</button>`}
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    if(dead){
+      overlay.querySelector("#restartFromAmbush").onclick = () => {
+        clearLocal();
+        world = null;
+        uiState.deathDialogShown = false;
+        overlay.remove();
+        renderStart();
+      };
+    } else {
+      overlay.querySelector("#okAmbush").onclick = () => overlay.remove();
+      setTimeout(() => { if(document.body.contains(overlay)) overlay.remove(); }, 5000);
+    }
+  }
+
   function openDeathDialog({ reason = "death" } = {}){
     // Avoid stacking dialogs.
     if(uiState.deathDialogShown) return;
@@ -1297,7 +1391,8 @@ function renderGame(){
       "SHIELD_BLOCK",
       "SHIELD_BROKEN",
       "FLASK_REVEAL",
-      "HEAL"
+      "HEAL",
+      "FP_GAIN"
     ]);
     return (events || []).some(e => meaningfulTypes.has(e.type));
   }
@@ -1428,6 +1523,11 @@ function renderGame(){
           else out.push(`${npcName(e.who)} healed ${e.amount} HP.`);
           break;
         }
+        case "FP_GAIN": {
+          if(e.who === "player") out.push(`You gained ${e.amount} FP.`);
+          else out.push(`${npcName(e.who)} gained ${e.amount} FP.`);
+          break;
+        }
         case "POISON_CURED": {
           if(e.who === "player") out.push("Your poison was cured.");
           else out.push(`${npcName(e.who)}'s poison was cured.`);
@@ -1444,6 +1544,15 @@ function renderGame(){
         case "DAMAGE_RECEIVED": {
           if(e.from === "environment") out.push(`You took ${e.dmg} damage from the environment.`);
           else out.push(`You took ${e.dmg} damage from ${npcName(e.from)}.`);
+          break;
+        }
+        case "CREATURE_ATTACK": {
+          if(e.target === "player"){
+            const poison = e.poisonApplied ? " You are poisoned." : "";
+            out.push(`${e.creature} attacked you. You lost ${e.dmg} HP.${poison}`);
+          } else {
+            out.push(`${e.creature} attacked ${npcName(e.target)} (${e.dmg} damage).`);
+          }
           break;
         }
         case "INFO": {

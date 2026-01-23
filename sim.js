@@ -242,7 +242,16 @@ function applyOnCollect(world, collector, area, itemInst, events){
   if(!def) return { consumed:false };
 
   if(def.effects?.autoConsumeOnCollect){
-    // Heal HP
+    // Restore FP (food/energy)
+    if(def.effects?.restoreFP){
+      const amt = Number(def.effects.restoreFP) || 0;
+      if(amt > 0){
+        collector.fp = Math.min(70, (collector.fp ?? 70) + amt);
+        events.push({ type:"FP_GAIN", who: collector.id, by: "resource", amount: amt, itemDefId: def.id, areaId: area.id });
+      }
+    }
+
+    // Heal HP (medical)
     if(def.effects?.healHP){
       const amt = Number(def.effects.healHP) || 0;
       if(amt > 0){
@@ -878,6 +887,12 @@ export function moveActorOneStep(world, who, toAreaId){
   const area = world.map?.areasById?.[String(to)];
   spawnEnterRewardsIfNeeded(world, area, { seed: world.meta.seed, day: world.meta.day });
 
+  // Creature encounters: if the destination has any creature elements, a creature will attack immediately.
+  // Target selection follows the same ordering rule as daily threats: lowest Perception, tie by initiative.
+  if(area && area.isActive !== false){
+    triggerCreatureEncounterOnEnter(world, area, { seed: world.meta.seed, day: world.meta.day }, events);
+  }
+
 
   if(who === "player"){
     const v = new Set(world.flags.visitedAreas || []);
@@ -885,6 +900,51 @@ export function moveActorOneStep(world, who, toAreaId){
     world.flags.visitedAreas = Array.from(v).sort((a,b)=>a-b);
   }
   return { ok:true, events };
+}
+
+function triggerCreatureEncounterOnEnter(world, area, { seed, day }, events){
+  const creatures = (area.activeElements || []).filter(e => e?.kind === "creature");
+  if(!creatures.length) return;
+
+  const present = getAliveActorsInArea(world, area.id);
+  if(present.length === 0) return;
+
+  // Pick target: lowest Perception, tie by initiative.
+  const scored = present.map(a => ({
+    id: a.id,
+    P: a.attrs?.P ?? 0,
+    init: initiativeScore(seed, day, a.id)
+  })).sort((x,y)=>x.P-y.P || y.init-x.init);
+  const target = actorById(world, scored[0].id);
+  if(!target || (target.hp ?? 0) <= 0) return;
+
+  // Pick one creature deterministically (keeps encounters readable even if multiple creatures exist).
+  const idx = Math.floor(prng(seed + 17, day, `enter_cre_${area.id}_${target.id}`) * creatures.length);
+  const creature = creatures[Math.max(0, Math.min(creatures.length - 1, idx))];
+
+  let dmg = (creature.dmgMin ?? 8) + Math.floor(prng(seed, day, `enter_cre_dmg_${area.id}_${target.id}`) * ((creature.dmgMax ?? 18) - (creature.dmgMin ?? 8) + 1));
+  if(creature.modifierType === "damage_add") dmg += Number(creature.modifierValue) || 0;
+  if(creature.modifierType === "damage_mul") dmg = Math.floor(dmg * (Number(creature.modifierValue) || 1));
+
+  applyDamage(target, dmg);
+  const creatureName = creature.modifier ? `${creature.modifier} ${creature.name}` : (creature.name || "Unknown Creature");
+  const ev = { type:"CREATURE_ATTACK", areaId: area.id, target: target.id, creature: creatureName, dmg, onEnter:true };
+
+  // Poison modifier
+  if(creature.modifierType === "poison"){
+    target.status = target.status || [];
+    if(!(target.status || []).some(s => s?.type === "poison")){
+      target.status.push({ type:"poison", perDay: 10, by:"creature" });
+      events.push({ type:"POISON_APPLIED", who: target.id, by:"creature" });
+      ev.poisonApplied = true;
+    }
+  }
+
+  events.push(ev);
+
+  if((target.hp ?? 0) <= 0){
+    events.push({ type:"DEATH", who: target.id, areaId: target.areaId, reason:"creature" });
+  }
 }
 
 export function endDay(world, npcIntents = [], dayEvents = []){
