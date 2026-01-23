@@ -95,17 +95,29 @@ function decidePosture(world, npc, obs, traits, { seed, day, playerDistrict }){
   }
 
   // Collect: greed-based; pick the highest-value visible ground item.
+  // Collect: NPCs should actually pick up loot (esp. early game).
+  // Rule of thumb:
+  // - If there are ground items and no immediate targets, strongly prefer collecting.
+  // - If there are targets, compare "collect value" vs "attack value" using traits.
   if(ground.length && invN < INVENTORY_LIMIT){
-    const r = hash01(seed, day, `npc_collect_bias|${npc.id}`);
-    if(r < (0.10 + traits.greed * 0.35)){
-      let bestIdx = 0;
-      let bestScore = -1e9;
-      for(let i=0;i<ground.length;i++){
-        const inst = ground[i];
-        const def = getItemDef(inst?.defId);
-        const score = itemValue(def, inst);
-        if(score > bestScore){ bestScore = score; bestIdx = i; }
-      }
+    let bestIdx = 0;
+    let bestScore = -1e9;
+    for(let i=0;i<ground.length;i++){
+      const inst = ground[i];
+      const def = getItemDef(inst?.defId);
+      const score = itemValue(def, inst);
+      if(score > bestScore){ bestScore = score; bestIdx = i; }
+    }
+
+    // Base: looters are more likely to grab something immediately.
+    // Deterministic jitter prevents everyone from acting identically.
+    const jitter = (hash01(seed, day, `collect_jitter|${npc.id}`) - 0.5) * 0.12;
+    // bestScore is already ~0..1, so keep it in that range.
+    const collectScore = bestScore * (0.75 + traits.greed * 1.10) + jitter;
+
+    // If no visible targets, almost always collect.
+    const noTargets = (obs.hereActors || []).length === 0;
+    if(noTargets || collectScore >= (0.30 + traits.caution * 0.20)){
       return { source: npc.id, type: "COLLECT", payload: { itemIndex: bestIdx } };
     }
   }
