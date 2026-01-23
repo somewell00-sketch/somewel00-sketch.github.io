@@ -582,7 +582,7 @@ function renderGame(){
     }
   });
 
-  let pendingConsume = null;
+  let pendingConfirm = null; // { type: "consume"|"discard", idx }
 
   // Tooltip system: use data-tooltip attributes and render a single styled tooltip.
   let tooltipActive = false;
@@ -623,20 +623,41 @@ function renderGame(){
     if(from && from !== to) hideTooltip();
   });
   confirmNo.onclick = () => {
-    pendingConsume = null;
+    pendingConfirm = null;
     confirmModal.classList.add("hidden");
   };
   confirmYes.onclick = () => {
-    if(!pendingConsume){ confirmModal.classList.add("hidden"); return; }
-    const idx = pendingConsume.idx;
-    const res = useInventoryItem(world, "player", idx, "player");
-    world = res.nextWorld;
-    uiState.dayEvents.push(...(res.events || []));
-    saveToLocal(world);
-    pendingConsume = null;
-    confirmModal.classList.add("hidden");
-    sync();
-    openResultDialog(res.events || []);
+    if(!pendingConfirm){ confirmModal.classList.add("hidden"); return; }
+    const { type, idx } = pendingConfirm;
+    if(type === "consume"){
+      const res = useInventoryItem(world, "player", idx, "player");
+      world = res.nextWorld;
+      uiState.dayEvents.push(...(res.events || []));
+      saveToLocal(world);
+      pendingConfirm = null;
+      confirmModal.classList.add("hidden");
+      sync();
+      openResultDialog(res.events || []);
+      return;
+    }
+    if(type === "discard"){
+      const p = world.entities.player;
+      if(p?.inventory?.items?.[idx]){
+        p.inventory.items.splice(idx, 1);
+        // Clean equipped refs
+        if(p.inventory?.equipped?.weaponDefId && !p.inventory.items.some(it => it.defId === p.inventory.equipped.weaponDefId)){
+          p.inventory.equipped.weaponDefId = null;
+        }
+        if(p.inventory?.equipped?.defenseDefId && !p.inventory.items.some(it => it.defId === p.inventory.equipped.defenseDefId)){
+          p.inventory.equipped.defenseDefId = null;
+        }
+      }
+      saveToLocal(world);
+      pendingConfirm = null;
+      confirmModal.classList.add("hidden");
+      sync();
+      return;
+    }
   };
 
   function handleAreaClick(id){
@@ -851,10 +872,26 @@ function renderGame(){
         <span class="pillIcon" aria-hidden="true">${escapeHtml(getItemIcon(it.defId))}</span>
         <span class="pillName">${escapeHtml(name)}${stack}</span>
         ${badge}
+        <span class="pillRemove" data-remove-idx="${idx}" title="Discard">×</span>
       </button>`;
     }).join("") : `<div class="muted small">Empty</div>`;
 
     // interactions
+    // Remove buttons
+    invPillsEl.querySelectorAll(".pillRemove").forEach(x => {
+      x.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const idx = Number(x.getAttribute("data-remove-idx"));
+        const it = items[idx];
+        const def = it ? getItemDef(it.defId) : null;
+        const name = def?.name || it?.defId || "item";
+        pendingConfirm = { type: "discard", idx };
+        confirmText.textContent = `Discard ${name}? It will be permanently destroyed.`;
+        confirmModal.classList.remove("hidden");
+      };
+    });
+
     invPillsEl.querySelectorAll(".itemPill").forEach(btn => {
       btn.onclick = () => {
         const idx = Number(btn.getAttribute("data-idx"));
@@ -876,7 +913,7 @@ function renderGame(){
         }
         if(def.type === ItemTypes.CONSUMABLE){
           // confirm modal
-          pendingConsume = { idx };
+          pendingConfirm = { type: "consume", idx };
           confirmText.textContent = `Use ${def.name}?`;
           confirmModal.classList.remove("hidden");
           return;

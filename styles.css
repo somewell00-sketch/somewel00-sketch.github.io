@@ -426,6 +426,27 @@ textarea{
   cursor:pointer;
 }
 
+.itemPill .pillRemove{
+  margin-left: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  color: rgba(240,240,242,0.75);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+}
+
+.itemPill .pillRemove:hover{
+  color: rgba(255,255,255,0.95);
+  border-color: rgba(250,208,44,0.45);
+  background: rgba(250,208,44,0.10);
+}
+
 .itemPill:hover{ border-color: rgba(250,208,44,0.45); }
 
 .itemPill.equipped{ outline: 2px solid rgba(250,208,44,0.55); }

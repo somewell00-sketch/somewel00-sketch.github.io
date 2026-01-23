@@ -252,3 +252,21 @@ export function strongestWeaponInInventory(inv, { forDispute = false } = {}){
   }
   return best;
 }
+
+export function rankedWeaponsInInventory(inv, { forDispute = false } = {}){
+  const list = [];
+  for(const it of (inv?.items || [])){
+    const def = getItemDef(it.defId);
+    if(!def || def.type !== ItemTypes.WEAPON) continue;
+    const qty = it.qty || 1;
+    const dmg = computeWeaponDamage(def, qty, null, null, { forDispute }).dmg;
+    list.push({ def, qty, dmg, defId: def.id });
+  }
+  list.sort((a,b)=> (b.dmg - a.dmg) || String(a.defId).localeCompare(String(b.defId)));
+  return list;
+}
+
+export function weaponByRank(inv, rank, { forDispute = false } = {}){
+  const list = rankedWeaponsInInventory(inv, { forDispute });
+  return list[rank] || null;
+}

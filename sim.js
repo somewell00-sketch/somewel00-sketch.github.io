@@ -11,6 +11,7 @@ import {
   addToInventory,
   removeInventoryItem,
   strongestWeaponInInventory,
+  weaponByRank,
   isPoisonWeapon
 } from "./items.js";
 
@@ -44,18 +45,38 @@ function actorById(world, id){
   return world.entities.npcs?.[id];
 }
 
+function getWeaponInstance(entity, defId){
+  if(!entity?.inventory || !Array.isArray(entity.inventory.items)) return null;
+  return entity.inventory.items.find(it => it.defId === defId) || null;
+}
+
 function getEquippedWeapon(entity){
   const defId = entity?.inventory?.equipped?.weaponDefId || null;
   if(!defId) return null;
-  const inst = (entity.inventory.items || []).find(it => it.defId === defId) || null;
+  const inst = getWeaponInstance(entity, defId);
   if(!inst) return null;
   const def = getItemDef(defId);
   if(!def || def.type !== ItemTypes.WEAPON) return null;
   return { def, inst };
 }
 
-function computeAttackDamage(seed, day, attacker, target, { forDispute = false } = {}){
-  const w = getEquippedWeapon(attacker);
+function getWeaponForAttack(entity, { prefer = "equipped", forDispute = false } = {}){
+  // prefer:
+  //  - "equipped": use currently equipped
+  //  - "best": strongest weapon in inventory
+  //  - "second": 2nd strongest weapon in inventory
+  if(prefer === "equipped") return getEquippedWeapon(entity);
+
+  const rank = (prefer === "second") ? 1 : 0;
+  const pick = weaponByRank(entity?.inventory, rank, { forDispute });
+  if(!pick?.defId) return null;
+  const inst = getWeaponInstance(entity, pick.defId);
+  if(!inst) return null;
+  return { def: pick.def, inst };
+}
+
+function computeAttackDamage(seed, day, attacker, target, { forDispute = false, weaponPrefer = "equipped" } = {}){
+  const w = getWeaponForAttack(attacker, { prefer: weaponPrefer, forDispute });
   if(!w){
     const base = 5;
     const bonus = Math.floor(prng(seed, day, `rpg_bonus_${attacker.id}`) * 4);
@@ -1321,6 +1342,7 @@ export function endDay(world, npcIntents = [], dayEvents = []){
 
   // --- 6.1 Ground items: resolve COLLECT disputes (before moves) ---
   const collectReqs = [];
+  const attackTargets = {};
   // Player collects resolve immediately on click.
   // NPC collect intents
   for(const act of (npcIntents || [])){
@@ -1328,9 +1350,12 @@ export function endDay(world, npcIntents = [], dayEvents = []){
       const idx = Number(act.payload?.itemIndex ?? 0);
       collectReqs.push({ who: act.source, areaId: startAreas[act.source], itemIndex: idx });
     }
+    if(act?.type === "ATTACK" && act?.source){
+      if(act.payload?.targetId) attackTargets[act.source] = act.payload.targetId;
+    }
   }
 
-  resolveCollectContests(next, collectReqs, events, { seed, day, killsThisDay, startAreas });
+  resolveCollectContests(next, collectReqs, events, { seed, day, killsThisDay, startAreas, attackTargets });
 
 
   // NPC movement intents (ignore combat declarations for now)
@@ -1492,7 +1517,7 @@ for(const e of [next.entities.player, ...Object.values(next.entities.npcs || {})
   return next;
 }
 
-function resolveCollectContests(world, collectReqs, events, { seed, day, killsThisDay, startAreas }){
+function resolveCollectContests(world, collectReqs, events, { seed, day, killsThisDay, startAreas, attackTargets }){
   if(!collectReqs.length) return;
 
   // Group requests by area then itemIndex. We resolve itemIndex ascending to keep deterministic.
@@ -1543,7 +1568,7 @@ function resolveCollectContests(world, collectReqs, events, { seed, day, killsTh
         events.push({ type:"GROUND_CONTEST", areaId: area.id, itemDefId: item.defId, outcome:"dex_win", winner: winner.who });
       } else {
         // Fight among tied best dex.
-        const fight = resolveTieFight(world, best.map(b => b.who), area.id, { seed, day, killsThisDay, itemDefId: item.defId, startAreas });
+        const fight = resolveTieFight(world, best.map(b => b.who), area.id, { seed, day, killsThisDay, itemDefId: item.defId, startAreas, attackTargets });
         winner = fight.winner ? { who: fight.winner, actor: actorById(world, fight.winner) } : null;
         events.push({ type:"GROUND_CONTEST", areaId: area.id, itemDefId: item.defId, outcome:"tie_fight", tied: best.map(b=>b.who), winner: winner?.who ?? null });
       }
@@ -1582,8 +1607,10 @@ function resolveCollectContests(world, collectReqs, events, { seed, day, killsTh
   }
 }
 
-function resolveTieFight(world, whoIds, areaId, { seed, day, killsThisDay, itemDefId, startAreas }){
-  // Free-for-all among whoIds, deterministic order by initiative. Continues until 1 remains.
+function resolveTieFight(world, whoIds, areaId, { seed, day, killsThisDay, itemDefId, startAreas, attackTargets }){
+  // Free-for-all among whoIds, deterministic order by initiative (acts like "order of sent actions").
+  // Each participant tries to hit their declared attack target (if that target is also in the dispute and alive).
+  // Otherwise, they hit the lowest-initiative remaining opponent.
   const alive = new Set(whoIds.filter(id => {
     const a = actorById(world, id);
     const at = startAreas?.[id] ?? a?.areaId;
@@ -1607,9 +1634,15 @@ function resolveTieFight(world, whoIds, areaId, { seed, day, killsThisDay, itemD
 
       const targets = Array.from(alive).filter(id => id !== attackerId);
       if(targets.length === 0) break;
-      // Target: lowest initiative among remaining (so order has meaning)
-      targets.sort((a,b)=>initiativeScore(seed, day, a) - initiativeScore(seed, day, b));
-      const targetId = targets[0];
+
+      // Preferred target: the actor's declared attack target for the day (if applicable).
+      const pref = attackTargets?.[attackerId];
+      let targetId = (pref && alive.has(pref)) ? pref : null;
+      if(!targetId){
+        // Fall back to the lowest-initiative opponent so the order feels consistent.
+        targets.sort((a,b)=>initiativeScore(seed, day, a) - initiativeScore(seed, day, b));
+        targetId = targets[0];
+      }
       const target = actorById(world, targetId);
       if(!target || (target.hp ?? 0) <= 0){
         alive.delete(targetId);
