@@ -112,7 +112,26 @@ function decidePosture(world, npc, obs, traits, { seed, day, playerDistrict }){
     return { source: npc.id, type: "DRINK", payload: {} };
   }
 
-  // Collect: greed-based; pick the highest-value visible ground item.
+  
+  // Low FP: prioritize food. If there is an FP-restoring consumable on the ground, try to collect it.
+  if((npc.fp ?? 0) <= 20 && ground.length && invN < INVENTORY_LIMIT){
+    let bestIdx = -1;
+    let bestGain = -1;
+    for(let i=0;i<ground.length;i++){
+      const inst = ground[i];
+      const def = getItemDef(inst?.defId);
+      const gain = Number(def?.effects?.healFP ?? 0);
+      if(gain > bestGain){
+        bestGain = gain;
+        bestIdx = i;
+      }
+    }
+    if(bestGain > 0 && bestIdx >= 0){
+      return { source: npc.id, type: "COLLECT", payload: { itemIndex: bestIdx } };
+    }
+  }
+
+// Collect: greed-based; pick the highest-value visible ground item.
   if(ground.length && invN < INVENTORY_LIMIT){
     const r = hash01(seed, day, `npc_collect_bias|${npc.id}`);
     if(r < (0.10 + traits.greed * 0.35)){
@@ -133,7 +152,13 @@ function decidePosture(world, npc, obs, traits, { seed, day, playerDistrict }){
     .map(x => x.entity)
     .filter(t => t && (t.hp ?? 0) > 0 && t.areaId === npc.areaId);
 
-  let bestAttack = null;
+  
+  // If the NPC has a strong weapon (>= 30 damage), prioritize attacking someone in the same area.
+  // This is a hard bias (not absolute) and still respects camouflage and district bias.
+  const strongW = strongestWeaponInInventory(npc.inventory) ;
+  const hasStrongWeapon = (strongW && (strongW.dmg ?? 0) >= 30);
+
+let bestAttack = null;
   let bestAttackScore = -1e9;
 
   for(const t of targets){
@@ -145,6 +170,7 @@ function decidePosture(world, npc, obs, traits, { seed, day, playerDistrict }){
     const risk = estimateRisk(world, npc, t);
 
     let score = killChance * (0.9 + traits.aggression) - risk * (0.6 + traits.caution);
+    if(hasStrongWeapon) score += 0.55;
     if(sameDistrict) score -= 0.55;
     if(playerDistrictBias) score -= 0.20;
     // Prefer weaker-looking targets.
@@ -181,7 +207,11 @@ function decideMove(world, npc, obs, traits, { seed, day }){
   const max = maxStepsForNpc(npc);
   if(max <= 0) return { source: npc.id, type: "STAY", payload: {} };
 
-  const visitedSet = new Set(Array.isArray(npc.memory?.visited) ? npc.memory.visited : []);
+  
+  const lowFp = (npc.fp ?? 0) <= 20;
+  const currentArea = world.map?.areasById?.[String(npc.areaId)];
+  const inCornucopia = Number(currentArea?.id) === 1;
+const visitedSet = new Set(Array.isArray(npc.memory?.visited) ? npc.memory.visited : []);
 
   // BFS up to 3 steps, but we score only known areas well. Unknown areas get conservative estimates.
   const start = Number(npc.areaId);
@@ -292,7 +322,9 @@ function scoreArea(world, npc, areaId, steps, traits, visitedSet, { seed, day })
   // Early Cornucopia: allow crowding so more NPCs contest loot.
   if(Number(areaId) === 1 && day === 1) crowdPenalty *= 0.2;
 
-  const needFood = clamp01((25 - (npc.fp ?? 0)) / 25);
+  const fpNow = Number(npc.fp ?? 0);
+  let needFood = clamp01((40 - fpNow) / 40);
+  if(fpNow <= 20) needFood = Math.min(1, needFood + 0.35);
   const safety = (a.threatClass === "safe" ? 0.45 : (a.threatClass === "neutral" ? 0.2 : -0.25));
   const threat = (a.threatClass === "threatening" ? 0.35 : 0.05) + (creatures * 0.25);
   const revisitPenalty = (Number(areaId) === Number(npc.areaId)) ? 0 : (known ? 0.02 : 0.06);

@@ -75,9 +75,10 @@ function getWeaponForAttack(entity, { prefer = "equipped", forDispute = false } 
   return { def: pick.def, inst };
 }
 
-function computeAttackDamage(seed, day, attacker, target, { forDispute = false, weaponPrefer = "equipped" } = {}){
-  const w = getWeaponForAttack(attacker, { prefer: weaponPrefer, forDispute });
-  if(!w){
+function computeAttackDamage(seed, day, attacker, target, { forDispute = false, weaponPrefer = "equipped", reserveStrongest = false } = {}){
+    const effectivePrefer = reserveStrongest ? "second" : weaponPrefer;
+  const w = getWeaponForAttack(attacker, { prefer: effectivePrefer, forDispute });
+if(!w){
     const base = 5;
     const bonus = Math.floor(prng(seed, day, `rpg_bonus_${attacker.id}`) * 4);
     return { ok:true, dmg: base + bonus, weaponDefId: null, meta: { fists: true } };
@@ -1101,7 +1102,7 @@ export function endDay(world, npcIntents = [], dayEvents = []){
 
     // Shield blocks most weapons.
     const shielded = !!target._today?.defendedWithShield;
-    const dmgRes = computeAttackDamage(seed, day, attacker, target, { forDispute:false });
+    const dmgRes = computeAttackDamage(seed, day, attacker, target, { forDispute:false, reserveStrongest: (disputeStrongestUsers && disputeStrongestUsers.has(attackerId)) });
     let dmg = dmgRes.dmg;
     const weaponDefId = dmgRes.weaponDefId;
     if(shielded && weaponDefId){
@@ -1355,7 +1356,8 @@ export function endDay(world, npcIntents = [], dayEvents = []){
     }
   }
 
-  resolveCollectContests(next, collectReqs, events, { seed, day, killsThisDay, startAreas, attackTargets });
+  const disputeStrongestUsers = new Set();
+  resolveCollectContests(next, collectReqs, events, { seed, day, killsThisDay, startAreas, attackTargets, disputeStrongestUsers });
 
 
   // NPC movement intents (ignore combat declarations for now)
@@ -1517,7 +1519,7 @@ for(const e of [next.entities.player, ...Object.values(next.entities.npcs || {})
   return next;
 }
 
-function resolveCollectContests(world, collectReqs, events, { seed, day, killsThisDay, startAreas, attackTargets }){
+function resolveCollectContests(world, collectReqs, events, { seed, day, killsThisDay, startAreas, attackTargets, disputeStrongestUsers }){
   if(!collectReqs.length) return;
 
   // Group requests by area then itemIndex. We resolve itemIndex ascending to keep deterministic.
@@ -1540,7 +1542,7 @@ function resolveCollectContests(world, collectReqs, events, { seed, day, killsTh
       byIndex.get(idx).push(r);
     }
 
-    const indices = Array.from(byIndex.keys()).sort((a,b)=>a-b);
+    const indices = Array.from(byIndex.keys()).sort((a,b)=>b-a);
     for(const idx of indices){
       const item = area.groundItems[idx];
       if(!item) continue;
@@ -1568,7 +1570,7 @@ function resolveCollectContests(world, collectReqs, events, { seed, day, killsTh
         events.push({ type:"GROUND_CONTEST", areaId: area.id, itemDefId: item.defId, outcome:"dex_win", winner: winner.who });
       } else {
         // Fight among tied best dex.
-        const fight = resolveTieFight(world, best.map(b => b.who), area.id, { seed, day, killsThisDay, itemDefId: item.defId, startAreas, attackTargets });
+        const fight = resolveTieFight(world, best.map(b => b.who), area.id, { seed, day, killsThisDay, itemDefId: item.defId, startAreas, attackTargets, disputeStrongestUsers });
         winner = fight.winner ? { who: fight.winner, actor: actorById(world, fight.winner) } : null;
         events.push({ type:"GROUND_CONTEST", areaId: area.id, itemDefId: item.defId, outcome:"tie_fight", tied: best.map(b=>b.who), winner: winner?.who ?? null });
       }
@@ -1607,7 +1609,7 @@ function resolveCollectContests(world, collectReqs, events, { seed, day, killsTh
   }
 }
 
-function resolveTieFight(world, whoIds, areaId, { seed, day, killsThisDay, itemDefId, startAreas, attackTargets }){
+function resolveTieFight(world, whoIds, areaId, { seed, day, killsThisDay, itemDefId, startAreas, attackTargets, disputeStrongestUsers }){
   // Free-for-all among whoIds, deterministic order by initiative (acts like "order of sent actions").
   // Each participant tries to hit their declared attack target (if that target is also in the dispute and alive).
   // Otherwise, they hit the lowest-initiative remaining opponent.
@@ -1621,6 +1623,9 @@ function resolveTieFight(world, whoIds, areaId, { seed, day, killsThisDay, itemD
 
   const maxRounds = 12; // small cap for safety
   const participants = Array.from(alive);
+  // Mark participants so their strongest weapon is reserved for the dispute.
+  if(disputeStrongestUsers){ for(const pid of participants) disputeStrongestUsers.add(pid); }
+
   for(let round=0; round<maxRounds && alive.size > 1; round++){
     for(const attackerId of order){
       if(alive.size <= 1) break;
