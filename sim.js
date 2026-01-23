@@ -1503,7 +1503,10 @@ function resolveCollectContests(world, collectReqs, events, { seed, day, killsTh
       byIndex.get(idx).push(r);
     }
 
-    const indices = Array.from(byIndex.keys()).sort((a,b)=>a-b);
+    // IMPORTANT: resolve from highest index to lowest so that
+    // removing an item does not shift the remaining indices and
+    // invalidate other contenders' requested indices.
+    const indices = Array.from(byIndex.keys()).sort((a,b)=>b-a);
     for(const idx of indices){
       const item = area.groundItems[idx];
       if(!item) continue;

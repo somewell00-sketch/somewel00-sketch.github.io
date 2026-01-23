@@ -100,14 +100,25 @@ function decidePosture(world, npc, obs, traits, { seed, day, playerDistrict }){
   // - If there are ground items and no immediate targets, strongly prefer collecting.
   // - If there are targets, compare "collect value" vs "attack value" using traits.
   if(ground.length && invN < INVENTORY_LIMIT){
-    let bestIdx = 0;
-    let bestScore = -1e9;
+    // Score all visible ground items.
+    const scoredItems = [];
     for(let i=0;i<ground.length;i++){
       const inst = ground[i];
       const def = getItemDef(inst?.defId);
-      const score = itemValue(def, inst);
-      if(score > bestScore){ bestScore = score; bestIdx = i; }
+      scoredItems.push({ idx: i, score: itemValue(def, inst) });
     }
+    scoredItems.sort((a,b)=>b.score-a.score);
+
+    // Deterministic variety: choose among the top few based on traits + jitter.
+    // This prevents everyone from always targeting the single "best" weapon.
+    const topK = scoredItems.slice(0, Math.min(4, scoredItems.length));
+    const r = hash01(seed, day, `collect_pick|${npc.id}`);
+    // Greedier NPCs skew toward the top; cautious NPCs spread a bit.
+    const skew = clamp01(0.35 + traits.greed * 0.55 - traits.caution * 0.15);
+    const pickPos = Math.floor(Math.pow(r, 1.0 + (1.5 * (1 - skew))) * topK.length);
+    const chosen = topK[Math.max(0, Math.min(topK.length - 1, pickPos))];
+    const bestIdx = chosen.idx;
+    const bestScore = chosen.score;
 
     // Base: looters are more likely to grab something immediately.
     // Deterministic jitter prevents everyone from acting identically.
@@ -351,6 +362,8 @@ function itemValue(def, inst){
   if(!def) return 0.05;
   if(def.type === ItemTypes.PROTECTION) return 0.9;
   if(def.type === ItemTypes.CONSUMABLE) return 0.7;
+  // Backpacks/containers are high priority early game.
+  if(def.effects?.opensIntoLoot) return 0.88;
   if(def.type === ItemTypes.WEAPON){
     let base = (def.damage ?? 0) / 100;
     if(def.stackable) base *= 0.8;
