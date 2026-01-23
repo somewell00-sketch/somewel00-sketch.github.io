@@ -236,8 +236,18 @@ const adjustedStayScore = stayScore + stayBias;
 
 
   // Inertia: don't move unless it is noticeably better.
+  // NOTE: We also add an explicit "leave empty areas" rule so NPCs don't freeze when there's
+  // no loot to fight for.
+  const here = world.map?.areasById?.[String(start)];
+  const hereGround = Array.isArray(here?.groundItems) ? here.groundItems : [];
+  const emptyHere = hereGround.length === 0;
+
+  // If the current area is empty, strongly encourage moving.
+  // If in Cornucopia, start leaving after getting at least 1 item.
+  const forceMove = emptyHere || (Number(start) === 1 && invCount >= 1);
+
   const moveThreshold = (0.14 + traits.caution * 0.10) + (invCount === 0 && Number(start) === 1 ? 0.06 : 0) - (invCount >= 2 ? 0.06 : 0);
-  const canMove = scored.some(s => !s.isStay && (s.score - adjustedStayScore) >= moveThreshold);
+  const canMove = forceMove || scored.some(s => !s.isStay && (s.score - adjustedStayScore) >= moveThreshold);
   if(!canMove) return { source: npc.id, type: "STAY", payload: {} };
 
   // Deterministic weighted choice among the top few candidates.
