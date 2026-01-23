@@ -1589,4 +1589,20 @@ function escapeHtml(s){
     .replaceAll("'","&#039;");
 }
 
+// Debug helper: render an inventory as compact pills.
+// This must live at the top-level because sync() uses it.
+function renderInvPills(inv){
+  const items = Array.isArray(inv?.items) ? inv.items : [];
+  if(!items.length) return `<span class="muted tiny">(empty)</span>`;
+  return items.slice(0, 7).map(it => {
+    const defId = it.defId;
+    const def = getItemDef(defId);
+    const icon = getItemIcon(defId);
+    const qty = Number(it.qty || 1);
+    const stack = qty > 1 ? ` x${escapeHtml(String(qty))}` : "";
+    const title = escapeHtml(def?.description || "");
+    return `<span class="debugItemPill" title="${title}"><span class="pillIcon" aria-hidden="true">${escapeHtml(icon)}</span>${escapeHtml(def?.name || defId)}${stack}</span>`;
+  }).join("");
+}
+
 renderStart();
