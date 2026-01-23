@@ -4,10 +4,23 @@ export function generateNpcIntents(world){
   const seed = world?.meta?.seed ?? 1;
 
   for (const npc of Object.values(world.entities.npcs)){
-    // Action 1: default defend (placeholder)
+    // Action 1: attempt to collect an item on the ground (low chance)
+    // This enables dexterity disputes.
+    const area = world.map.areasById[String(npc.areaId)];
+    const ground = Array.isArray(area?.groundItems) ? area.groundItems : [];
+    if(ground.length){
+      const invCount = (npc.inventory?.items || []).reduce((acc,it)=>acc + (it.qty ? 1 : 1), 0);
+      const rCollect = prng(seed, day, `collect_${npc.id}`);
+      if(invCount < 7 && rCollect < 0.25){
+        const idx = Math.floor(prng(seed+1337, day, `collect_pick_${npc.id}`) * ground.length);
+        intents.push({ source: npc.id, type: "COLLECT", payload: { itemIndex: idx } });
+      }
+    }
+
+    // Action 2: default defend (placeholder)
     intents.push({ source: npc.id, type: "DEFEND", payload: {} });
 
-    // Action 2: small move chance
+    // Action 3: small move chance
     const adj = world.map.adjById[String(npc.areaId)] || [];
     if (adj.length === 0) continue;
 

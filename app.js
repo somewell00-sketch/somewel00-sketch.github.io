@@ -990,6 +990,13 @@ function renderGame(){
         }
         case "COLLECT": {
           if(e.ok){
+            if(e.queued){
+              const def = getItemDef(e.itemDefId);
+              const nm = def?.name || e.itemDefId;
+              const qty = e.qty && e.qty > 1 ? ` x${e.qty}` : "";
+              out.push(`You will attempt to collect ${nm}${qty} when the day ends.`);
+              break;
+            }
             if(e.opened){
               out.push("You opened a backpack.");
               if(e.gained?.length) out.push(`You gained: ${e.gained.map(x => getItemDef(x)?.name || x).join(", ")}.`);
@@ -1054,8 +1061,18 @@ function renderGame(){
           break;
         }
         case "DEATH": {
-          if(e.who === "player") out.push("You died.");
+          if(e.who === "player"){
+            if(e.reason === "area_closed") out.push("You died: your area vanished.");
+            else if(e.reason === "starvation") out.push("You died of starvation.");
+            else out.push("You died.");
+          }
           else out.push(`${npcName(e.who)} died.`);
+          break;
+        }
+
+        case "EAT": {
+          if(e.who === "player") out.push("You found food and restored your fatigue.");
+          else out.push(`${npcName(e.who)} found food.`);
           break;
         }
         case "ARRIVAL": {

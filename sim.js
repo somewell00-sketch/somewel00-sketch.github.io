@@ -57,6 +57,22 @@ function prng(seed, day, salt){
   return (h >>> 0) / 4294967296;
 }
 
+function initiativeScore(seed, day, actorId){
+  // Deterministic tiebreaker (single-player friendly): depends on seed + day + actorId.
+  // Higher score = acts earlier.
+  let h = 2166136261 >>> 0;
+  const s = String(seed) + "|" + String(day) + "|init|" + String(actorId);
+  for (let i=0;i<s.length;i++){
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  // Mix bits
+  h ^= h << 13; h >>>= 0;
+  h ^= h >>> 17; h >>>= 0;
+  h ^= h << 5; h >>>= 0;
+  return h >>> 0;
+}
+
 function applyDamage(target, dmg){
   target.hp = Math.max(0, (target.hp ?? 100) - dmg);
 }
@@ -147,53 +163,17 @@ export function commitPlayerAction(world, action){
       return { nextWorld: next, events };
     }
 
+    // Queue the collect to be resolved deterministically in endDay.
+    // This is required to support dexterity disputes and item-fight tiebreakers.
     const idx = Number(action?.itemIndex ?? 0);
     const item = area.groundItems[idx] ?? area.groundItems[0];
     if(!item){
       events.push({ type:"COLLECT", ok:false, reason:"missing_item" });
       return { nextWorld: next, events };
     }
-
-    // Remove from ground first
-    const realIdx = area.groundItems.indexOf(item);
-    if(realIdx !== -1) area.groundItems.splice(realIdx, 1);
-
-    // Backpack opens into 2–3 items, then disappears
-    if(item.defId === "backpack"){
-      const salt = item.meta?.seedTag || `bp_${realIdx}`;
-      const roll = prng(seed, day, `bp_open_${salt}`);
-      const count = 2 + Math.floor(roll * 2); // 2..3
-      const pool = ["sword","club","spear","trident","axe","wand","knife","dagger","bow","blowgun","shield","camouflage","flask"];
-
-      const gained = [];
-      for(let k=0;k<count;k++){
-        const pick = pool[Math.floor(prng(seed, day, `bp_pick_${salt}_${k}`) * pool.length)];
-        // Stackables are tracked per-slot with qty (max 7). Initial drop qty is 1.
-        const qty = 1;
-        const meta = {};
-        if(pick === "flask"){
-          meta.hiddenKind = (prng(seed, day, `bp_flask_${salt}_${k}`) < 0.5) ? "medicine" : "poison";
-        }
-        const ok = addToInventory(player.inventory, { defId: pick, qty, meta });
-        if(ok.ok){
-          gained.push(pick);
-        } else {
-          // drop back on ground if full
-          area.groundItems.push({ defId: pick, qty, meta });
-        }
-      }
-      events.push({ type:"COLLECT", ok:true, itemDefId:"backpack", opened:true, gained });
-      return { nextWorld: next, events };
-    }
-
-    const ok = addToInventory(player.inventory, item);
-    if(!ok.ok){
-      // Put it back if we couldn't add
-      area.groundItems.unshift(item);
-      events.push({ type:"COLLECT", ok:false, reason: ok.reason });
-      return { nextWorld: next, events };
-    }
-    events.push({ type:"COLLECT", ok:true, itemDefId: item.defId, qty: item.qty || 1 });
+    player._intent = player._intent || {};
+    player._intent.collect = { day, areaId: player.areaId, itemIndex: idx };
+    events.push({ type:"COLLECT", ok:true, queued:true, itemDefId: item.defId, qty: item.qty || 1 });
     return { nextWorld: next, events };
   }
 
@@ -304,6 +284,10 @@ export function commitPlayerAction(world, action){
     if((target.hp ?? 0) <= 0){
       events.push({ type:"DEATH", who: targetId, areaId: target.areaId });
       player.kills = (player.kills ?? 0) + 1;
+      // Record kill for deterministic spoils.
+      next.flags = next.flags || {};
+      next.flags.killsThisDay = Array.isArray(next.flags.killsThisDay) ? next.flags.killsThisDay : [];
+      next.flags.killsThisDay.push({ deadId: targetId, areaId: target.areaId, participants: ["player"], reason: "attack" });
     }
     if((player.hp ?? 0) <= 0){
       events.push({ type:"DEATH", who: "player", areaId: player.areaId });
@@ -446,7 +430,12 @@ export function endDay(world, npcIntents = [], dayEvents = []){
   // Ends the day, applies NPC movement + maintenance, logs events, advances day.
   const next = cloneWorld(world);
   const day = next.meta.day;
+  const seed = next.meta.seed;
   const events = [...(dayEvents || [])];
+
+  // Collect kill records accumulated during the day (e.g., from manual attacks).
+  // Used for deterministic loot distribution.
+  const killsThisDay = Array.isArray(next.flags?.killsThisDay) ? next.flags.killsThisDay : [];
 
   // Track positions to report who moved into the player's area when the day ends.
   const playerArea = next.entities.player.areaId;
@@ -454,6 +443,30 @@ export function endDay(world, npcIntents = [], dayEvents = []){
   for(const npc of Object.values(next.entities.npcs || {})){
     prevNpcAreas[npc.id] = npc.areaId;
   }
+
+  // Snapshot starting positions for deterministic action resolution (collect disputes).
+  const startAreas = { player: next.entities.player.areaId };
+  for(const npc of Object.values(next.entities.npcs || {})) startAreas[npc.id] = npc.areaId;
+
+  // --- 6.1 Ground items: resolve COLLECT disputes (before moves) ---
+  const collectReqs = [];
+  // Player queued collect
+  const pIntent = next.entities.player._intent?.collect;
+  if(pIntent && pIntent.day === day){
+    collectReqs.push({ who: "player", areaId: pIntent.areaId, itemIndex: pIntent.itemIndex });
+  }
+  // NPC collect intents
+  for(const act of (npcIntents || [])){
+    if(act?.type === "COLLECT" && act?.source){
+      const idx = Number(act.payload?.itemIndex ?? 0);
+      collectReqs.push({ who: act.source, areaId: startAreas[act.source], itemIndex: idx });
+    }
+  }
+
+  resolveCollectContests(next, collectReqs, events, { seed, day, killsThisDay, startAreas });
+
+  // Clear one-day intent after it is consumed
+  if(next.entities.player._intent) next.entities.player._intent.collect = null;
 
   // NPC movement intents (ignore combat declarations for now)
   for(const act of (npcIntents || [])){
@@ -492,15 +505,22 @@ export function endDay(world, npcIntents = [], dayEvents = []){
     }
   }
 
-  // Maintenance: FP -10; Cornucopia restores
+  // --- 6.2 Spoils after a kill ---
+  // Loot is distributed among participants (who dealt damage / were in the dispute)
+  // ordered by Dexterity (tie-breaker: initiative).
+  distributeSpoils(next, killsThisDay, events, { seed, day });
+  // Clear for next day
+  next.flags = next.flags || {};
+  next.flags.killsThisDay = [];
+
+  // --- 7.1 FP maintenance ---
+  //  - Start: 70
+  //  - -10 per day
+  //  - If the area has food, eating is automatic and restores to 70
+  //  - If someone starts a day at 0 FP and doesn't eat that day, they die
   for(const e of [next.entities.player, ...Object.values(next.entities.npcs || {})]){
     if((e.hp ?? 0) <= 0) continue;
-    const inCorn = (e.areaId === 1);
-    if(inCorn){
-      e.fp = 70;
-    } else {
-      e.fp = (e.fp ?? 70) - 10;
-    }
+    e.fp = Math.max(0, (e.fp ?? 70) - 10);
   }
 
   // Advance to the next day first, then apply area closures/scheduling so that
@@ -510,6 +530,22 @@ export function endDay(world, npcIntents = [], dayEvents = []){
   // This timing is important for the "red border one day before" UI.
   next.meta.day += 1;
   applyClosuresForDay(next, next.meta.day);
+
+  // At the start of the new day: auto-eat in areas with food; otherwise starvation check.
+  for(const e of [next.entities.player, ...Object.values(next.entities.npcs || {})]){
+    if((e.hp ?? 0) <= 0) continue;
+    const a = next.map.areasById[String(e.areaId)];
+    const hasFood = !!a?.hasFood;
+    if(hasFood){
+      if((e.fp ?? 0) < 70) events.push({ type:"EAT", who: e.id, areaId: e.areaId });
+      e.fp = 70;
+    } else {
+      if((e.fp ?? 0) <= 0){
+        e.hp = 0;
+        events.push({ type:"DEATH", who: e.id, areaId: e.areaId, reason:"starvation" });
+      }
+    }
+  }
 
   // If the player's current area is closed after day advancement, the player dies.
   // This ensures "standing on a vanished area" is treated as an instant death.
@@ -523,6 +559,200 @@ export function endDay(world, npcIntents = [], dayEvents = []){
   next.log.days.push({ day, events });
 
   return next;
+}
+
+function resolveCollectContests(world, collectReqs, events, { seed, day, killsThisDay, startAreas }){
+  if(!collectReqs.length) return;
+
+  // Group requests by area then itemIndex. We resolve itemIndex ascending to keep deterministic.
+  const byArea = new Map();
+  for(const r of collectReqs){
+    if(r == null) continue;
+    const key = String(r.areaId);
+    if(!byArea.has(key)) byArea.set(key, []);
+    byArea.get(key).push(r);
+  }
+
+  for(const [areaKey, reqs] of byArea.entries()){
+    const area = world.map.areasById[areaKey];
+    if(!area || !Array.isArray(area.groundItems) || area.groundItems.length === 0) continue;
+
+    const byIndex = new Map();
+    for(const r of reqs){
+      const idx = Number(r.itemIndex ?? 0);
+      if(!byIndex.has(idx)) byIndex.set(idx, []);
+      byIndex.get(idx).push(r);
+    }
+
+    const indices = Array.from(byIndex.keys()).sort((a,b)=>a-b);
+    for(const idx of indices){
+      const item = area.groundItems[idx];
+      if(!item) continue;
+
+      const contenders = byIndex.get(idx)
+        .map(r => ({ who: r.who, actor: actorById(world, r.who) }))
+        .filter(x => x.actor && (x.actor.hp ?? 0) > 0 && (startAreas?.[x.who] ?? x.actor.areaId) === area.id);
+
+      if(contenders.length === 0) continue;
+
+      // Dexterity contest (higher D wins). Tie for best D => weapon fight.
+      const scored = contenders.map(c => ({
+        ...c,
+        D: c.actor.attrs?.D ?? 0,
+        init: initiativeScore(seed, day, c.who)
+      }));
+      scored.sort((a,b)=>b.D-a.D || b.init-a.init);
+
+      const bestD = scored[0].D;
+      const best = scored.filter(s => s.D === bestD);
+
+      let winner = null;
+      if(best.length === 1){
+        winner = best[0];
+        events.push({ type:"GROUND_CONTEST", areaId: area.id, itemDefId: item.defId, outcome:"dex_win", winner: winner.who });
+      } else {
+        // Fight among tied best dex.
+        const fight = resolveTieFight(world, best.map(b => b.who), area.id, { seed, day, killsThisDay, itemDefId: item.defId, startAreas });
+        winner = fight.winner ? { who: fight.winner, actor: actorById(world, fight.winner) } : null;
+        events.push({ type:"GROUND_CONTEST", areaId: area.id, itemDefId: item.defId, outcome:"tie_fight", tied: best.map(b=>b.who), winner: winner?.who ?? null });
+      }
+
+      if(!winner || !winner.actor || (winner.actor.hp ?? 0) <= 0) {
+        // Nobody alive at the end; item stays.
+        continue;
+      }
+
+      // Attempt to pick up.
+      if(inventoryCount(winner.actor.inventory) >= INVENTORY_LIMIT){
+        events.push({ type:"COLLECT", ok:false, who: winner.who, reason:"inventory_full", itemDefId: item.defId, areaId: area.id });
+        continue;
+      }
+
+      // Remove from ground and add to inventory.
+      const removed = area.groundItems.splice(idx, 1)[0];
+      const ok = addToInventory(winner.actor.inventory, removed);
+      if(!ok.ok){
+        // Put it back at the front if we couldn't add (shouldn't happen if count check passed).
+        area.groundItems.unshift(removed);
+        events.push({ type:"COLLECT", ok:false, who: winner.who, reason: ok.reason || "failed", itemDefId: removed.defId, areaId: area.id });
+      } else {
+        events.push({ type:"COLLECT", ok:true, who: winner.who, itemDefId: removed.defId, qty: removed.qty || 1, areaId: area.id });
+      }
+    }
+  }
+}
+
+function resolveTieFight(world, whoIds, areaId, { seed, day, killsThisDay, itemDefId, startAreas }){
+  // Free-for-all among whoIds, deterministic order by initiative. Continues until 1 remains.
+  const alive = new Set(whoIds.filter(id => {
+    const a = actorById(world, id);
+    const at = startAreas?.[id] ?? a?.areaId;
+    return a && (a.hp ?? 0) > 0 && at === areaId;
+  }));
+  const order = Array.from(alive).sort((a,b)=>initiativeScore(seed, day, b) - initiativeScore(seed, day, a));
+  if(order.length <= 1) return { winner: order[0] || null };
+
+  const maxRounds = 12; // small cap for safety
+  const participants = Array.from(alive);
+  for(let round=0; round<maxRounds && alive.size > 1; round++){
+    for(const attackerId of order){
+      if(alive.size <= 1) break;
+      if(!alive.has(attackerId)) continue;
+      const attacker = actorById(world, attackerId);
+      const attackerArea = startAreas?.[attackerId] ?? attacker?.areaId;
+      if(!attacker || (attacker.hp ?? 0) <= 0 || attackerArea !== areaId){
+        alive.delete(attackerId);
+        continue;
+      }
+
+      const targets = Array.from(alive).filter(id => id !== attackerId);
+      if(targets.length === 0) break;
+      // Target: lowest initiative among remaining (so order has meaning)
+      targets.sort((a,b)=>initiativeScore(seed, day, a) - initiativeScore(seed, day, b));
+      const targetId = targets[0];
+      const target = actorById(world, targetId);
+      if(!target || (target.hp ?? 0) <= 0){
+        alive.delete(targetId);
+        continue;
+      }
+
+      const bestW = strongestWeaponInInventory(attacker.inventory, { forDispute: true });
+      const dmg = bestW ? bestW.dmg : (5 + Math.floor(prng(seed, day, `dispute_bonus_${attackerId}_${round}`) * 4));
+      applyDamage(target, dmg);
+      // No shield/defense during dispute fights.
+      // Record damage event (compact)
+      // Note: we do not consume weapon uses in disputes for now.
+      
+      if((target.hp ?? 0) <= 0){
+        alive.delete(targetId);
+        // Record kill participants for spoils
+        killsThisDay.push({ deadId: targetId, areaId, participants, reason: "item_dispute", itemDefId });
+      }
+    }
+  }
+
+  const winner = Array.from(alive)[0] || null;
+  return { winner };
+}
+
+function distributeSpoils(world, kills, events, { seed, day }){
+  for(const k of (kills || [])){
+    const dead = actorById(world, k.deadId);
+    if(!dead) continue;
+    const area = world.map.areasById[String(k.areaId)];
+    if(!area) continue;
+
+    const participants = (k.participants || [])
+      .map(id => ({ id, actor: actorById(world, id) }))
+      .filter(x => x.actor && (x.actor.hp ?? 0) > 0 && x.actor.areaId === k.areaId);
+
+    if(participants.length === 0) continue;
+    if(!dead.inventory || !(dead.inventory.items || []).length) continue;
+
+    // Sort by Dexterity desc, tie by initiative desc.
+    participants.sort((a,b)=>{
+      const dA = a.actor.attrs?.D ?? 0;
+      const dB = b.actor.attrs?.D ?? 0;
+      if(dB !== dA) return dB - dA;
+      return initiativeScore(seed, day, b.id) - initiativeScore(seed, day, a.id);
+    });
+
+    const loot = [...(dead.inventory.items || [])];
+    dead.inventory.items = [];
+    dead.inventory.equipped = { weaponDefId: null, defenseDefId: null };
+
+    let i = 0;
+    while(loot.length){
+      const picker = participants[i % participants.length];
+      i += 1;
+      if(inventoryCount(picker.actor.inventory) >= INVENTORY_LIMIT){
+        // Can't take more; skip.
+        // If everyone is full, break.
+        const allFull = participants.every(p => inventoryCount(p.actor.inventory) >= INVENTORY_LIMIT);
+        if(allFull) break;
+        continue;
+      }
+      const nextItem = loot.shift();
+      const ok = addToInventory(picker.actor.inventory, nextItem);
+      if(ok.ok){
+        events.push({ type:"SPOILS_PICK", who: picker.id, from: k.deadId, itemDefId: nextItem.defId, qty: nextItem.qty || 1, areaId: k.areaId });
+      } else {
+        // drop to ground
+        area.groundItems = Array.isArray(area.groundItems) ? area.groundItems : [];
+        area.groundItems.push(nextItem);
+        events.push({ type:"SPOILS_DROP", from: k.deadId, itemDefId: nextItem.defId, qty: nextItem.qty || 1, areaId: k.areaId });
+      }
+    }
+
+    // Remaining loot drops to ground.
+    if(loot.length){
+      area.groundItems = Array.isArray(area.groundItems) ? area.groundItems : [];
+      for(const it of loot){
+        area.groundItems.push(it);
+        events.push({ type:"SPOILS_DROP", from: k.deadId, itemDefId: it.defId, qty: it.qty || 1, areaId: k.areaId });
+      }
+    }
+  }
 }
 
 function applyClosuresForDay(world, day){
