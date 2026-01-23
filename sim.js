@@ -890,7 +890,10 @@ export function moveActorOneStep(world, who, toAreaId){
   // Creature encounters: if the destination has any creature elements, a creature will attack immediately.
   // Target selection follows the same ordering rule as daily threats: lowest Perception, tie by initiative.
   if(area && area.isActive !== false){
-    triggerCreatureEncounterOnEnter(world, area, { seed: world.meta.seed, day: world.meta.day }, events);
+    // If the player is the one entering, always make the creature hit the entrant.
+    // Otherwise, use the usual target rule (lowest Perception, tie by initiative).
+    const forcedTargetId = (who === "player") ? "player" : null;
+    triggerCreatureEncounterOnEnter(world, area, { seed: world.meta.seed, day: world.meta.day, forcedTargetId }, events);
   }
 
 
@@ -902,20 +905,26 @@ export function moveActorOneStep(world, who, toAreaId){
   return { ok:true, events };
 }
 
-function triggerCreatureEncounterOnEnter(world, area, { seed, day }, events){
+function triggerCreatureEncounterOnEnter(world, area, { seed, day, forcedTargetId = null }, events){
   const creatures = (area.activeElements || []).filter(e => e?.kind === "creature");
   if(!creatures.length) return;
 
   const present = getAliveActorsInArea(world, area.id);
   if(present.length === 0) return;
 
-  // Pick target: lowest Perception, tie by initiative.
-  const scored = present.map(a => ({
-    id: a.id,
-    P: a.attrs?.P ?? 0,
-    init: initiativeScore(seed, day, a.id)
-  })).sort((x,y)=>x.P-y.P || y.init-x.init);
-  const target = actorById(world, scored[0].id);
+  let target = null;
+  if(forcedTargetId){
+    target = actorById(world, forcedTargetId);
+  }
+  if(!target){
+    // Pick target: lowest Perception, tie by initiative.
+    const scored = present.map(a => ({
+      id: a.id,
+      P: a.attrs?.P ?? 0,
+      init: initiativeScore(seed, day, a.id)
+    })).sort((x,y)=>x.P-y.P || y.init-x.init);
+    target = actorById(world, scored[0].id);
+  }
   if(!target || (target.hp ?? 0) <= 0) return;
 
   // Pick one creature deterministically (keeps encounters readable even if multiple creatures exist).
