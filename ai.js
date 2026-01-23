@@ -221,6 +221,18 @@ function scoreArea(world, npc, areaId, steps, traits, visitedSet, { seed, day })
   const lootValue = known ? (groundCount * 0.35) : 0.08;
   const foodValue = (a.hasFood ? 0.45 : 0) + (a.hasWater ? 0.18 : 0);
 
+  // Crowd pressure: NPCs dislike staying packed together (especially in the Cornucopia).
+  let crowd = 0;
+  const p = world?.entities?.player;
+  if(p && (p.hp ?? 0) > 0 && Number(p.areaId) === Number(areaId) && !(p._today?.invisible)) crowd++;
+  for(const other of Object.values(world?.entities?.npcs || {})){
+    if(!other || (other.hp ?? 0) <= 0) continue;
+    if(Number(other.areaId) !== Number(areaId)) continue;
+    if(other._today?.invisible) continue;
+    crowd++;
+  }
+  const crowdPenalty = Math.max(0, (crowd - 1)) * (0.04 + traits.caution * 0.03) + ((Number(areaId) === 1 && day >= 2) ? 0.10 : 0);
+
   const needFood = clamp01((25 - (npc.fp ?? 0)) / 25);
   const safety = (a.threatClass === "safe" ? 0.45 : (a.threatClass === "neutral" ? 0.2 : -0.25));
   const threat = (a.threatClass === "threatening" ? 0.35 : 0.05) + (creatures * 0.25);
@@ -234,7 +246,8 @@ function scoreArea(world, npc, areaId, steps, traits, visitedSet, { seed, day })
     safety * (0.25 + traits.caution) -
     threat * (0.25 + traits.caution) -
     distanceCost -
-    revisitPenalty;
+    revisitPenalty -
+    crowdPenalty;
 
   // tiny deterministic jitter to break ties.
   return score + (hash01(seed, day, `area_jitter|${npc.id}|${areaId}`) * 0.01);

@@ -1245,11 +1245,20 @@ export function endDay(world, npcIntents = [], dayEvents = []){
   for(const act of (npcIntents || [])){
     if(!act || !act.source) continue;
     if(act.type === "MOVE"){
-      const route = Array.isArray(act.payload?.route) ? act.payload.route : [];
-      const to = (route.length ? route[route.length-1] : act.payload?.toAreaId);
-      if(to != null){
-        const res = moveActorOneStep(next, act.source, to);
-        events.push(...res.events);
+      // IMPORTANT: routes are multi-step. We must move one adjacent step at a time.
+      const route = Array.isArray(act.payload?.route) ? act.payload.route.map(Number) : [];
+      if(route.length){
+        for(const stepId of route){
+          const res = moveActorOneStep(next, act.source, stepId);
+          events.push(...res.events);
+          if(!res.ok) break;
+        }
+      } else {
+        const to = act.payload?.toAreaId;
+        if(to != null){
+          const res = moveActorOneStep(next, act.source, to);
+          events.push(...res.events);
+        }
       }
     } else if(act.type === "STAY"){
       events.push({ type:"STAY", who: act.source });
