@@ -675,6 +675,12 @@ function renderGame(){
 
     // reveal the destination immediately (spec: unlocking/revealing on click)
     saveToLocal(world);
+
+    // Auto end the day after the 3rd move for a smoother flow.
+    // Do not auto-end if the player died from an on-enter event.
+    if(uiState.movesUsed >= MAX_MOVES_PER_DAY && (world.entities.player.hp ?? 0) > 0){
+      performEndDay();
+    }
   }
 
   function resetDayState(){
@@ -1181,7 +1187,7 @@ function renderGame(){
     openResultDialog(events);
   };
 
-  btnEndDay.onclick = () => {
+  function performEndDay(){
     if(!world) return;
     const intents = generateNpcIntents(world);
     world = endDay(world, intents, uiState.dayEvents);
@@ -1190,7 +1196,9 @@ function renderGame(){
     saveToLocal(world);
     sync();
     openEndDayDialog(world.log.days[world.log.days.length-1]?.events || []);
-  };
+  }
+
+  btnEndDay.onclick = () => performEndDay();
 
   if(btnEndDayTrapped){
     btnEndDayTrapped.onclick = () => btnEndDay.onclick();
