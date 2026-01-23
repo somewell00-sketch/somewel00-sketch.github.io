@@ -218,9 +218,26 @@ function decideMove(world, npc, obs, traits, { seed, day }){
   const stayScore = scored.find(s => s.isStay)?.score ?? -1e9;
   const bestScore = scored[0]?.score ?? stayScore;
 
+
+// Dispersal rule (Cornucopia + general):
+// 0 items -> tends to stay and fight for loot
+// 1 item  -> starts considering leaving
+// 2+ items -> strongly prefers leaving
+const invCount = inventoryCount(npc.inventory);
+let stayBias = 0;
+if(Number(start) === 1){
+  if(invCount === 0) stayBias = +0.22;
+  else if(invCount === 1) stayBias = -0.28;
+  else stayBias = -0.55;
+} else {
+  if(invCount >= 2) stayBias = -0.12;
+}
+const adjustedStayScore = stayScore + stayBias;
+
+
   // Inertia: don't move unless it is noticeably better.
-  const moveThreshold = 0.14 + traits.caution * 0.10;
-  const canMove = scored.some(s => !s.isStay && (s.score - stayScore) >= moveThreshold);
+  const moveThreshold = (0.14 + traits.caution * 0.10) + (invCount === 0 && Number(start) === 1 ? 0.06 : 0) - (invCount >= 2 ? 0.06 : 0);
+  const canMove = scored.some(s => !s.isStay && (s.score - adjustedStayScore) >= moveThreshold);
   if(!canMove) return { source: npc.id, type: "STAY", payload: {} };
 
   // Deterministic weighted choice among the top few candidates.
