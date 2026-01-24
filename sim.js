@@ -39,6 +39,114 @@ const FP_COST = {
 // 1 step: 4 | 2 steps: 4+3=7 | 3 steps: 4+3+4=11
 const MOVE_STEP_COST = [4, 3, 4];
 
+// --- Territory noise (quiet / noisy / highly_noisy) ---
+const NOISE = {
+  QUIET: "quiet",
+  NOISY: "noisy",
+  HIGHLY: "highly_noisy"
+};
+
+function livingEntities(world){
+  const all = [world?.entities?.player, ...Object.values(world?.entities?.npcs || {})];
+  return all.filter(e => e && (e.hp ?? 0) > 0);
+}
+
+function updateEntityStayStreaks(world){
+  for(const e of livingEntities(world)){
+    const cur = Number(e.areaId);
+    const last = Number(e.noiseLastAreaId ?? cur);
+    if(last === cur) e.noiseStayDays = Math.max(1, Number(e.noiseStayDays ?? 1) + 1);
+    else {
+      e.noiseLastAreaId = cur;
+      e.noiseStayDays = 1;
+    }
+  }
+}
+
+function updateAreaNoise(world, events, { seed, day }){
+  // Update per-entity permanence first.
+  updateEntityStayStreaks(world);
+
+  const byArea = new Map();
+  for(const e of livingEntities(world)){
+    const k = String(e.areaId);
+    if(!byArea.has(k)) byArea.set(k, []);
+    byArea.get(k).push(e);
+  }
+
+  for(const area of Object.values(world.map?.areasById || {})){
+    if(!area) continue;
+    const prev = area.noiseState || NOISE.QUIET;
+    const ents = byArea.get(String(area.id)) || [];
+
+    // Decay if empty.
+    if(ents.length === 0){
+      if(prev === NOISE.HIGHLY) area.noiseState = NOISE.NOISY;
+      else if(prev === NOISE.NOISY) area.noiseState = NOISE.QUIET;
+      else area.noiseState = NOISE.QUIET;
+      continue;
+    }
+
+    const concentration = ents.length >= 2;
+    const permanence2 = ents.some(e => Number(e.noiseStayDays ?? 1) >= 2);
+    const permanence3 = ents.some(e => Number(e.noiseStayDays ?? 1) >= 3);
+    const isNoisy = concentration || permanence2;
+
+    let nextState = NOISE.QUIET;
+    if(isNoisy) nextState = NOISE.NOISY;
+    if(permanence3) nextState = NOISE.HIGHLY;
+
+    // If it was already noisy and it stays noisy again, it escalates.
+    if(prev === NOISE.NOISY && isNoisy) nextState = NOISE.HIGHLY;
+
+    area.noiseState = nextState;
+  }
+
+  // Player-facing ambience hint.
+  const p = world?.entities?.player;
+  if(p && (p.hp ?? 0) > 0){
+    const a = world.map?.areasById?.[String(p.areaId)];
+    const st = a?.noiseState || NOISE.QUIET;
+    if(st === NOISE.NOISY) events.push({ type:"AMBIENCE", level:"noisy", areaId: p.areaId, text:"You hear movement nearby." });
+    if(st === NOISE.HIGHLY) events.push({ type:"AMBIENCE", level:"highly_noisy", areaId: p.areaId, text:"The arena is loud here. Something is hunting." });
+  }
+}
+
+function applyHighlyNoisyHostileEvents(world, events, { seed, day }){
+  for(const area of Object.values(world.map?.areasById || {})){
+    if(!area || area.noiseState !== NOISE.HIGHLY) continue;
+    const ents = livingEntities(world).filter(e => Number(e.areaId) === Number(area.id));
+    if(!ents.length) continue;
+    const roll = prng(seed + 313, day, `highly_noisy_hostile_${area.id}`);
+    if(roll >= 0.5) continue;
+
+    // Pick a deterministic victim.
+    const idx = Math.floor(prng(seed + 911, day, `highly_noisy_victim_${area.id}`) * ents.length);
+    const target = ents[idx] || ents[0];
+    const dmg = 12 + Math.floor(prng(seed + 121, day, `highly_noisy_dmg_${area.id}`) * 14); // 12..25
+    applyDamage(target, dmg);
+    events.push({ type:"HOSTILE_EVENT", who: target.id, areaId: area.id, dmg, note:"highly_noisy" });
+    if((target.hp ?? 0) <= 0) events.push({ type:"DEATH", who: target.id, areaId: area.id, reason:"hostile_event" });
+  }
+}
+
+function applyLaserStagnation(world, events){
+  const p = world?.entities?.player;
+  if(!p || (p.hp ?? 0) <= 0) return;
+  if(p.__movedToday) return;
+
+  const alive = livingEntities(world);
+  if(alive.length !== 1) return; // only one tribute left
+
+  const area = world.map?.areasById?.[String(p.areaId)];
+  const st = area?.noiseState || NOISE.QUIET;
+  if(st !== NOISE.NOISY && st !== NOISE.HIGHLY) return;
+
+  applyDamage(p, 10);
+  events.push({ type:"LASER", who:"player", areaId: p.areaId, dmg: 10, text:"The arena is aiming at me." });
+  if((p.hp ?? 0) <= 0) events.push({ type:"DEATH", who:"player", areaId: p.areaId, reason:"laser" });
+}
+
 export function isAdjacent(world, fromId, toId){
   const adj = world.map.adjById[String(fromId)] || [];
   return adj.includes(Number(toId));
@@ -1395,6 +1503,13 @@ export function endDay(world, npcIntents = [], dayEvents = []){
   const startAreas = { player: next.entities.player.areaId };
   for(const npc of Object.values(next.entities.npcs || {})) startAreas[npc.id] = npc.areaId;
 
+  // Preserve movement info (used by the laser rule and other end-of-day systems)
+  // before we clear per-day flags.
+  for(const e of [next.entities.player, ...Object.values(next.entities.npcs || {})]){
+    if(!e) continue;
+    e.__movedToday = !!(e._today?.moved);
+  }
+
   // RESET_TODAY_FLAGS: clear per-day flags (defend/invisible/fed/etc.).
   for(const e of [next.entities.player, ...Object.values(next.entities.npcs || {})]){
     if(!e) continue;
@@ -1807,6 +1922,16 @@ export function endDay(world, npcIntents = [], dayEvents = []){
     }
   }
 
+  // --- Territory noise update + Highly Noisy events + Laser ---
+  updateAreaNoise(next, events, { seed, day });
+  applyHighlyNoisyHostileEvents(next, events, { seed, day });
+  applyLaserStagnation(next, events);
+
+  // --- Territory noise + Highly Noisy events + laser (end-of-day) ---
+  updateAreaNoise(next, events, { seed, day });
+  applyHighlyNoisyHostileEvents(next, events, { seed, day });
+  applyLaserStagnation(next, events);
+
   // Ongoing status effects (poison)
   for(const e of [next.entities.player, ...Object.values(next.entities.npcs || {})]){
     if((e.hp ?? 0) <= 0) continue;
@@ -1895,7 +2020,14 @@ for(const e of [next.entities.player, ...Object.values(next.entities.npcs || {})
   e._today.invisible = false;
 
   const a = next.map.areasById[String(e.areaId)];
-  const hasFood = !!a?.hasFood;
+  const noise = a?.noiseState || NOISE.QUIET;
+  // Noisy areas have reduced foraging efficiency.
+  // (When noisy: 25% of the time food fails to sustain you.)
+  let hasFood = !!a?.hasFood;
+  if(hasFood && noise === NOISE.NOISY){
+    const roll = prng(next.meta.seed + 777, next.meta.day, `noisy_food_${a.id}_${e.id}`);
+    if(roll < 0.25) hasFood = false;
+  }
 
   if(hasFood){
     if((Number(e.fp ?? 0)) < FP_MAX) events.push({ type:"EAT", who: e.id, areaId: e.areaId });

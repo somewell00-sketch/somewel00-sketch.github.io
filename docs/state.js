@@ -582,8 +582,8 @@ function generateTributeName(district, rng){
   return `${first} ${last}`;
 }
 
-export function createInitialWorld({ seed, mapSize, mapData, totalPlayers = 12, playerDistrict = 12, playerAttrs = null }){
-  const total = Math.max(2, Math.min(48, Number(totalPlayers) || 12));
+export function createInitialWorld({ seed, mapSize, mapData, totalPlayers = 24, playerDistrict = 12, playerAttrs = null }){
+  const total = Math.max(2, Math.min(48, Number(totalPlayers) || 24));
   const npcCount = total - 1;
 
   const perDistrict = Math.max(1, Math.floor(total / 12));
@@ -618,7 +618,9 @@ for (let i = 1; i <= npcCount; i++){
     attrs: randomAttrs7(rng),
     status: [],
     inventory: createEmptyInventory(),
-    memory: { goal: "survive" }
+    memory: { goal: "survive" },
+    noiseLastAreaId: 1,
+    noiseStayDays: 1
   };
 }
 
@@ -645,7 +647,9 @@ for (let i = 1; i <= npcCount; i++){
         attrs: resolvedPlayerAttrs,
         status: [],
         inventory: createEmptyInventory(),
-        memory: { goal: "survive" }
+        memory: { goal: "survive" },
+        noiseLastAreaId: 1,
+        noiseStayDays: 1
       },
       npcs
     },
@@ -676,6 +680,7 @@ for (let i = 1; i <= npcCount; i++){
   for(const a of Object.values(world.map?.areasById || {})){
     if(!a) continue;
     a.hasFood = (Number(a.id) === 1);
+    a.noiseState = "quiet";
   }
 
   // Initialize ground items for all areas

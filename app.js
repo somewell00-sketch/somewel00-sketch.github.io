@@ -296,8 +296,9 @@ function renderStart(){
 
           <label class="muted">Players</label>
           <select id="players" class="select">
-            <option value="12" selected>12</option>
-            <option value="24">24</option>
+            <option value="12">12</option>
+            <option value="24" selected>24</option>
+            <option value="36">36</option>
             <option value="48">48</option>
           </select>
 
@@ -1351,7 +1352,7 @@ function renderGame(){
   };
 
   document.getElementById("regen").onclick = () => {
-    startNewGame(world.meta.mapSize, world.meta.totalPlayers || 12, world.entities.player.district || 12);
+    startNewGame(world.meta.mapSize, world.meta.totalPlayers || 24, world.entities.player.district || 12);
   };
   document.getElementById("restart").onclick = () => {
     clearLocal();

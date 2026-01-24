@@ -312,6 +312,12 @@ function scoreArea(world, npc, areaId, steps, traits, visitedSet, { seed, day })
   if(!a) return -1e9;
   if(a.isActive === false) return -1e9;
 
+  // Territory noise: NPCs are attracted to noisy zones.
+  // (Noisy: +25% likelihood, Highly noisy: +50% likelihood)
+  // We implement this as a soft score bonus.
+  const noise = a.noiseState || "quiet";
+  const noiseBonus = (noise === "noisy") ? 0.10 : (noise === "highly_noisy" ? 0.20 : 0);
+
   // Hard avoid areas that will vanish tomorrow.
   if(a.willCloseOnDay != null && Number(a.willCloseOnDay) === day + 1) return -999;
 
@@ -361,7 +367,8 @@ function scoreArea(world, npc, areaId, steps, traits, visitedSet, { seed, day })
     revisitPenalty -
     crowdPenalty +
     explore -
-    recentPenalty;
+    recentPenalty +
+    noiseBonus;
 
   // tiny deterministic jitter to break ties.
   return score + (hash01(seed, day, `area_jitter|${npc.id}|${areaId}`) * 0.01);
