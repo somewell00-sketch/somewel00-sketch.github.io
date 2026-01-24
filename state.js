@@ -671,20 +671,11 @@ for (let i = 1; i <= npcCount; i++){
   }
 
   // --- Food availability (FP system) ---
-  // Areas with food automatically restore FP to 70 at the start of the day.
-  // Cornucopia always has food. Other areas are assigned deterministically by seed.
+  // Cornucopia always refills FP at day start.
+  // Other areas do NOT auto-refill FP; food there is a finite ground item.
   for(const a of Object.values(world.map?.areasById || {})){
     if(!a) continue;
-    if(a.id === 1){
-      a.hasFood = true;
-      continue;
-    }
-    const biome = String(a.biome || "").toLowerCase();
-    let chance = 0.18;
-    if(biome.includes("desert") || biome.includes("glacier")) chance = 0.04;
-    if(biome.includes("tundra") || biome.includes("mountain")) chance = 0.08;
-    if(biome.includes("lake") || biome.includes("swamp") || biome.includes("jungle") || biome.includes("forest")) chance = 0.26;
-    a.hasFood = rng.next() < chance;
+    a.hasFood = (Number(a.id) === 1);
   }
 
   // Initialize ground items for all areas
