@@ -1289,7 +1289,8 @@ function renderGame(){
     resetDayState();
     saveToLocal(world);
     sync();
-    openEndDayDialog(world.log.days[world.log.days.length-1]?.events || []);
+    const evs = world.log.days[world.log.days.length-1]?.events || [];
+    if(shouldShowEndDayDialog(evs)) openEndDayDialog(evs);
   }
 
   btnEndDay.onclick = () => {
@@ -1317,7 +1318,8 @@ function renderGame(){
     resetDayState();
     saveToLocal(world);
     sync();
-    openEndDayDialog(world.log.days[world.log.days.length-1]?.events || []);
+    const evs = world.log.days[world.log.days.length-1]?.events || [];
+    if(shouldShowEndDayDialog(evs)) openEndDayDialog(evs);
   };
 
   document.getElementById("regen").onclick = () => {
@@ -1663,13 +1665,11 @@ function renderGame(){
   }
 
   function openEndDayDialog(events){
-    const pArea = world.entities.player.areaId;
     const npcName = (id) => {
       const n = world?.entities?.npcs?.[id];
       return n?.name || id;
     };
 
-    const arrivals = (events || []).filter(e => e.type === "ARRIVAL" && e.to === pArea);
     // Deaths: prefer event log, but also support compound events like MINE_BLAST.
     const deadIds = new Set();
     for(const e of (events || [])){
@@ -1680,9 +1680,21 @@ function renderGame(){
     }
     const deadNames = Array.from(deadIds).map(id => npcName(id));
     const cannonCount = deadNames.length;
-    const hereNow = Object.values(world.entities.npcs || {})
-      .filter(n => (n.hp ?? 0) > 0 && n.areaId === pArea)
-      .map(n => n.name);
+
+    // Player damage during the day rollover (poison ticks, mines, daily threats, etc.).
+    const rolloverDmg = (events || []).filter(e => {
+      if(!e) return false;
+      if(e.who !== "player") return false;
+      // These events occur during endDay() / new-day processing (not from the player's commit UI).
+      return ["POISON_TICK","MINE_HIT","CREATURE_ATTACK"].includes(e.type);
+    });
+
+    const dmgLines = [];
+    for(const e of rolloverDmg){
+      if(e.type === "POISON_TICK") dmgLines.push(`Poison dealt ${e.dmg} damage.`);
+      else if(e.type === "MINE_HIT") dmgLines.push(`A mine dealt ${e.dmg} damage.`);
+      else if(e.type === "CREATURE_ATTACK") dmgLines.push(`${e.creature} attacked you for ${e.dmg} damage.`);
+    }
 
     const overlay = document.createElement("div");
     overlay.className = "modalOverlay";
@@ -1698,9 +1710,10 @@ function renderGame(){
             ${deadNames.length ? deadNames.map(n => `<span class="itemPill" style="cursor:default;">${escapeHtml(n)}</span>`).join("") : `<span class="muted small">No deaths today.</span>`}
           </div>
 
-          <div class="eventLine"><strong>Your area:</strong> Area ${pArea}</div>
-          <div class="eventLine"><strong>Who is in your area right now:</strong> ${hereNow.length ? escapeHtml(hereNow.join(", ")) : "Nobody"}</div>
-          <div class="eventLine"><strong>Who came to your area today:</strong> ${arrivals.length ? escapeHtml(arrivals.map(a => npcName(a.who)).join(", ")) : "Nobody"}</div>
+          ${dmgLines.length ? `
+            <div class="eventLine" style="margin-top:10px;"><strong>You were hurt as the day ended:</strong></div>
+            ${dmgLines.map(t => `<div class="eventLine">${escapeHtml(t)}</div>`).join("")}
+          ` : ""}
         </div>
 
         <div class="row" style="margin-top:14px; justify-content:flex-end;">
@@ -1711,6 +1724,23 @@ function renderGame(){
     document.body.appendChild(overlay);
     overlay.querySelector("#ok").onclick = () => overlay.remove();
     setTimeout(() => { if(document.body.contains(overlay)) overlay.remove(); }, 5000);
+  }
+
+  function shouldShowEndDayDialog(events){
+    // Only show the end-of-day popup if something meaningful happened:
+    // - any tribute died (including the player)
+    // - the player took damage during the day rollover (poison tick, mine, daily threat)
+    const evs = Array.isArray(events) ? events : [];
+    let anyDeath = false;
+    for(const e of evs){
+      if(!e) continue;
+      if(e.type === "DEATH" && e.who) { anyDeath = true; break; }
+      if(e.type === "MINE_BLAST" && Array.isArray(e.dead) && e.dead.length) { anyDeath = true; break; }
+    }
+    if(anyDeath) return true;
+
+    const rolloverDamage = evs.some(e => e && e.who === "player" && ["POISON_TICK","MINE_HIT","CREATURE_ATTACK"].includes(e.type) && Number(e.dmg || 0) > 0);
+    return rolloverDamage;
   }
 }
 
