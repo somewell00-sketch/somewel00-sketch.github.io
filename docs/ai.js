@@ -245,6 +245,8 @@ const visitedSet = new Set(Array.isArray(npc.memory?.visited) ? npc.memory.visit
       seen.add(nid);
       const a = world.map?.areasById?.[String(nid)];
       if(!a || a.isActive === false) continue;
+      // Movement constraints: skip impassable water areas.
+      if(a.hasWater && !a.hasBridge) continue;
       // Avoid areas that will vanish tomorrow.
       const willCloseTomorrow = (a.willCloseOnDay != null) && (Number(a.willCloseOnDay) === day + 1);
       if(willCloseTomorrow) continue;
@@ -311,6 +313,8 @@ function scoreArea(world, npc, areaId, steps, traits, visitedSet, { seed, day })
   const a = world.map?.areasById?.[String(areaId)];
   if(!a) return -1e9;
   if(a.isActive === false) return -1e9;
+  // Hard avoid areas that are not enterable (e.g., water without bridge).
+  if(a.hasWater && !a.hasBridge) return -1e9;
 
   // Territory noise: NPCs are attracted to noisy zones.
   // (Noisy: +25% likelihood, Highly noisy: +50% likelihood)

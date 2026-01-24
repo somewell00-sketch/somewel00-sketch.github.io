@@ -1424,18 +1424,6 @@ export function moveActorOneStep(world, who, toAreaId){
   const from = entity.areaId;
   const to = Number(toAreaId);
 
-  // Movement costs FP per step (so multi-step routes match 4/7/11 totals).
-  entity._today = entity._today || {};
-  const already = Number(entity._today.moveSteps || 0);
-  const stepCost = MOVE_STEP_COST[Math.min(already, MOVE_STEP_COST.length - 1)] || MOVE_STEP_COST[MOVE_STEP_COST.length - 1];
-  const fpRes = spendFp(entity, stepCost);
-  entity._today.moveSteps = already + 1;
-  entity._today.moved = true;
-  // Moving cancels defensive/stealth positioning. You always end in the open.
-  entity._today.defendedWithShield = false;
-  entity._today.invisible = false;
-  events.push({ type:"FP_COST", who, kind:"MOVE", spent: fpRes.spent, fp: entity.fp, from, to });
-
   if(!isAreaActive(world, from)){
     events.push({ type:"MOVE_BLOCKED", who, from, to, reason:"start_area_closed" });
     return { ok:false, events };
@@ -1449,6 +1437,19 @@ export function moveActorOneStep(world, who, toAreaId){
     events.push({ type:"MOVE_BLOCKED", who, from, to, reason: enter.reason });
     return { ok:false, events };
   }
+
+  // Movement costs FP per step (so multi-step routes match 4/7/11 totals).
+  // Important: only spend FP if the move actually happens.
+  entity._today = entity._today || {};
+  const already = Number(entity._today.moveSteps || 0);
+  const stepCost = MOVE_STEP_COST[Math.min(already, MOVE_STEP_COST.length - 1)] || MOVE_STEP_COST[MOVE_STEP_COST.length - 1];
+  const fpRes = spendFp(entity, stepCost);
+  entity._today.moveSteps = already + 1;
+  entity._today.moved = true;
+  // Moving cancels defensive/stealth positioning. You always end in the open.
+  entity._today.defendedWithShield = false;
+  entity._today.invisible = false;
+  events.push({ type:"FP_COST", who, kind:"MOVE", spent: fpRes.spent, fp: entity.fp, from, to });
 
   entity.areaId = to;
   events.push({ type:"MOVE", who, from, to });
