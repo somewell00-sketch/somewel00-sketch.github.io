@@ -429,9 +429,34 @@ export function generateMapData({ seed, regions, width=820, height=820, paletteI
   // biomes with quotas
   const counts = {};
   for(const b of BIOMES) counts[b] = 0;
+  // --- Arena theming (20% chance): ~75% of cells become one dominant biome ---
+  const isThemedArena = rng.next() < 0.20;
+  const dominantBiome = isThemedArena ? pick(BIOMES, rng) : null;
+
+  if (isThemedArena && dominantBiome){
+    const targetCount = Math.floor(cells.length * 0.75);
+    const scored = cells
+      .filter(c => c.id !== 1)
+      .map(c => {
+        const sc = biomeScores(c.features);
+        return { cell: c, score: sc[dominantBiome] || 0 };
+      })
+      .sort((a,b)=> b.score - a.score);
+
+    for (let i = 0; i < targetCount && i < scored.length; i++){
+      scored[i].cell.biome = dominantBiome;
+    }
+  }
+
+
 
   // pass 1
   for(const cell of cells){
+    // arena temática pode pré-fixar biomas; preserva e só contabiliza
+    if (cell.id !== 1 && cell.biome && cell.biome !== "plains"){
+      counts[cell.biome] = (counts[cell.biome] || 0) + 1;
+      continue;
+    }
     if (cell.id === 1){
       // área inicial especial
       cell.biome = "fairy";
