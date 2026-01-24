@@ -8,6 +8,53 @@ import { saveToLocal, loadFromLocal, clearLocal, downloadJSON, uploadJSON } from
 
 const root = document.getElementById("root");
 
+// --- Global tooltip system (works on start screen and in-game) ---
+const getUiTooltipEl = () => document.getElementById("uiTooltip");
+let __tooltipsInit = false;
+let tooltipActive = false;
+let tooltipText = "";
+function showTooltip(text){
+  const uiTooltipEl = getUiTooltipEl();
+  if(!uiTooltipEl) return;
+  tooltipActive = true;
+  tooltipText = String(text || "");
+  uiTooltipEl.textContent = tooltipText;
+  uiTooltipEl.classList.remove("hidden");
+}
+function hideTooltip(){
+  tooltipActive = false;
+  const uiTooltipEl = getUiTooltipEl();
+  if(!uiTooltipEl) return;
+  uiTooltipEl.classList.add("hidden");
+}
+function moveTooltip(e){
+  const uiTooltipEl = getUiTooltipEl();
+  if(!tooltipActive || !uiTooltipEl) return;
+  const pad = 14;
+  const w = uiTooltipEl.offsetWidth || 240;
+  const h = uiTooltipEl.offsetHeight || 80;
+  const x = clamp((e.clientX + 14), pad, window.innerWidth - w - pad);
+  const y = clamp((e.clientY + 16), pad, window.innerHeight - h - pad);
+  uiTooltipEl.style.left = `${x}px`;
+  uiTooltipEl.style.top = `${y}px`;
+}
+function ensureTooltips(){
+  if(__tooltipsInit) return;
+  __tooltipsInit = true;
+  document.addEventListener("mousemove", moveTooltip, { passive:true });
+  document.addEventListener("mouseover", (e) => {
+    const t = e.target?.closest?.("[data-tooltip]");
+    if(!t) return;
+    const txt = t.getAttribute("data-tooltip");
+    if(txt) showTooltip(txt);
+  });
+  document.addEventListener("mouseout", (e) => {
+    const t = e.target?.closest?.("[data-tooltip]");
+    if(!t) return;
+    hideTooltip();
+  });
+}
+
 // Ensure item definitions are loaded before any UI/simulation tries to reference them.
 try {
   await itemsReady;
@@ -185,6 +232,8 @@ function districtTag(d){
 }
 
 function renderStart(){
+  // Enable hover tooltips on the start screen as well.
+  ensureTooltips();
   root.innerHTML = `
     <div class="screen">
       <div class="card">
@@ -483,10 +532,31 @@ function renderGame(){
 
       <!-- RIGHT: player inventory + debug -->
       <aside class="panel" id="rightPanel">
-        <div class="h1" style="margin:0;">YOU</div>
-        <div class="muted small">HP: <span id="youHp"></span> | FP: <span id="youFp"></span></div>
+        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <div class="h1" style="margin:0; display:flex; align-items:center; gap:8px;">YOU <span id="youPoison" class="poisonIcon hidden" title="Poisoned">☠</span></div>
+          <div id="youMeta" class="muted small" style="text-align:right;"></div>
+        </div>
 
-        <div class="section" style="margin-top:10px;">
+        <div class="statBlock">
+          <div class="statLine">
+            <div class="muted small">HP <span id="youHpText"></span></div>
+          </div>
+          <div class="statBar"><div id="youHpBar" class="statFill"></div></div>
+          <div class="statLine" style="margin-top:10px;">
+            <div class="muted small">FP <span id="youFpText"></span></div>
+          </div>
+          <div class="statBar"><div id="youFpBar" class="statFill"></div></div>
+        </div>
+
+        <div class="section" style="margin-top:12px;">
+          <div class="muted">Attack item</div>
+          <div id="attackSlot" class="slotRow" style="margin-top:8px;"></div>
+          <div class="muted" style="margin-top:10px;">Defense item</div>
+          <div id="defenseSlot" class="slotRow" style="margin-top:8px;"></div>
+          <div class="muted small" style="margin-top:10px;">Click a weapon to equip it for attacks. Click a Shield to equip it for defense.</div>
+        </div>
+
+        <div class="section" style="margin-top:12px;">
           <div class="muted">Inventory</div>
           <div class="muted small" style="margin-top:6px;">Limit: <span id="invCount"></span> / ${INVENTORY_LIMIT}</div>
           <div id="invPills" class="pillWrap" style="margin-top:10px;"></div>
@@ -527,7 +597,6 @@ function renderGame(){
       </aside>
     </div>
 
-    <div id="uiTooltip" class="uiTooltip hidden" role="tooltip"></div>
   `;
 
   const dayEl = document.getElementById("day");
@@ -559,8 +628,14 @@ function renderGame(){
 
   const debugList = document.getElementById("debugList");
 
-  const youHpEl = document.getElementById("youHp");
-  const youFpEl = document.getElementById("youFp");
+  const youMetaEl = document.getElementById("youMeta");
+  const youPoisonEl = document.getElementById("youPoison");
+  const youHpTextEl = document.getElementById("youHpText");
+  const youFpTextEl = document.getElementById("youFpText");
+  const youHpBarEl = document.getElementById("youHpBar");
+  const youFpBarEl = document.getElementById("youFpBar");
+  const attackSlotEl = document.getElementById("attackSlot");
+  const defenseSlotEl = document.getElementById("defenseSlot");
   const invCountEl = document.getElementById("invCount");
   const invPillsEl = document.getElementById("invPills");
 
@@ -568,8 +643,6 @@ function renderGame(){
   const confirmText = document.getElementById("confirmText");
   const confirmYes = document.getElementById("confirmYes");
   const confirmNo = document.getElementById("confirmNo");
-
-  const uiTooltipEl = document.getElementById("uiTooltip");
 
   const areaInfoEl = document.getElementById("areaInfo");
 
@@ -587,44 +660,8 @@ function renderGame(){
 
   let pendingConfirm = null; // { type: "consume"|"discard", idx }
 
-  // Tooltip system: use data-tooltip attributes and render a single styled tooltip.
-  let tooltipActive = false;
-  let tooltipText = "";
-  function showTooltip(text){
-    if(!uiTooltipEl) return;
-    tooltipActive = true;
-    tooltipText = String(text || "");
-    uiTooltipEl.textContent = tooltipText;
-    uiTooltipEl.classList.remove("hidden");
-  }
-  function hideTooltip(){
-    tooltipActive = false;
-    if(!uiTooltipEl) return;
-    uiTooltipEl.classList.add("hidden");
-  }
-  function moveTooltip(e){
-    if(!tooltipActive || !uiTooltipEl) return;
-    const pad = 14;
-    const w = uiTooltipEl.offsetWidth || 240;
-    const h = uiTooltipEl.offsetHeight || 80;
-    const x = clamp((e.clientX + 14), pad, window.innerWidth - w - pad);
-    const y = clamp((e.clientY + 16), pad, window.innerHeight - h - pad);
-    uiTooltipEl.style.left = `${x}px`;
-    uiTooltipEl.style.top = `${y}px`;
-  }
-  // capture events so pills can be re-rendered without re-binding tooltip handlers
-  root.addEventListener("mousemove", moveTooltip, { passive:true });
-  root.addEventListener("mouseover", (e) => {
-    const t = e.target?.closest?.("[data-tooltip]");
-    if(!t) return;
-    const text = t.getAttribute("data-tooltip");
-    if(text){ showTooltip(text); }
-  });
-  root.addEventListener("mouseout", (e) => {
-    const from = e.target?.closest?.("[data-tooltip]");
-    const to = e.relatedTarget?.closest?.("[data-tooltip]");
-    if(from && from !== to) hideTooltip();
-  });
+  // Tooltips are global (start screen + in-game)
+  ensureTooltips();
   confirmNo.onclick = () => {
     pendingConfirm = null;
     confirmModal.classList.add("hidden");
@@ -851,13 +888,63 @@ function renderGame(){
 
   function renderInventory(){
     const p = world.entities.player;
-    youHpEl.textContent = String(p.hp ?? 100);
-    youFpEl.textContent = String(p.fp ?? 70);
+    // Header meta: district + attributes + poison
+    const a = p.attrs || { F:0, D:0, P:0 };
+    if(youMetaEl){
+      youMetaEl.textContent = `D${p.district} • S${a.F} D${a.D} P${a.P}`;
+    }
+    const poisoned = (p.status || []).some(s => s?.type === "poison");
+    if(youPoisonEl){
+      if(poisoned) youPoisonEl.classList.remove("hidden");
+      else youPoisonEl.classList.add("hidden");
+    }
+
+    const hp = clamp(Number(p.hp ?? 100), 0, 100);
+    const fp = clamp(Number(p.fp ?? 70), 0, 70);
+    if(youHpTextEl) youHpTextEl.textContent = `${hp}/100`;
+    if(youFpTextEl) youFpTextEl.textContent = `${fp}/70`;
+
+    const hpPct = hp / 100;
+    const fpPct = fp / 70;
+    function barClass(pct){
+      if(pct >= 0.5) return "good";
+      if(pct >= 0.25) return "warn";
+      return "bad";
+    }
+    if(youHpBarEl){
+      youHpBarEl.style.width = `${Math.round(hpPct*100)}%`;
+      youHpBarEl.classList.remove("good","warn","bad");
+      youHpBarEl.classList.add(barClass(hpPct));
+    }
+    if(youFpBarEl){
+      youFpBarEl.style.width = `${Math.round(fpPct*100)}%`;
+      youFpBarEl.classList.remove("good","warn","bad");
+      youFpBarEl.classList.add(barClass(fpPct));
+    }
     invCountEl.textContent = String(inventoryCount(p.inventory));
 
     const items = p.inventory?.items || [];
     const weaponEq = p.inventory?.equipped?.weaponDefId;
     const defEq = p.inventory?.equipped?.defenseDefId;
+
+    // Equipped slots
+    function renderSlot(el, defId, emptyLabel){
+      if(!el) return;
+      if(!defId){
+        el.innerHTML = `<div class="muted small">${escapeHtml(emptyLabel)}</div>`;
+        return;
+      }
+      const def = getItemDef(defId);
+      const icon = getItemIcon(defId);
+      const name = def?.name || defId;
+      const tip = def ? def.description : "";
+      el.innerHTML = `<div class="slotPill" data-tooltip="${escapeHtml(tip)}">
+        <span class="pillIcon" aria-hidden="true">${escapeHtml(icon)}</span>
+        <span class="pillName">${escapeHtml(name)}</span>
+      </div>`;
+    }
+    renderSlot(attackSlotEl, weaponEq, "No attack item equipped");
+    renderSlot(defenseSlotEl, defEq, "No defense item equipped");
 
     invPillsEl.innerHTML = items.length ? items.map((it, idx) => {
       const def = getItemDef(it.defId);
