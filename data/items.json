@@ -180,10 +180,7 @@
       "blocksByShield": false,
       "penetratesShield": true,
       "selfDamage": 15,
-    "halfIfTargetDexHigher": true,
-    "splashDamage": 30,
-    "splashIfOtherPercBelowTarget": true,
-    "selfExtraDamageIfUserPercBelowTarget": 15
+      "halfIfTargetDexHigher": true
     },
     "icon": "💣"
   },

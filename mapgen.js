@@ -131,6 +131,25 @@ const BIOMES = [
   "fairy","swamp","lake","industrial"
 ];
 
+// --- Arena names (display) ---
+const ARENA_NAME_BY_BIOME = {
+  regular: "Survival Arena",
+  glacier: "Himani Arena",
+  tundra: "Kunlun Arena",
+  mountain: "Orqo Arena",
+  desert: "Sahari Arena",
+  caatinga: "Baraúna Arena",
+  savanna: "Savanaari Arena",
+  plains: "Pampaari Arena",
+  woods: "Aranya Arena",
+  forest: "Ka’aguay Arena",
+  jungle: "Yvapurũ Arena",
+  fairy: "Tianxian Arena",
+  swamp: "Pantanari Arena",
+  lake: "Mayu Arena",
+  industrial: "Karkhan Arena"
+};
+
 const QUOTAS = {
   glacier:    { min: 1, max: 8 },
   tundra:     { min: 1, max: 8 },
@@ -267,28 +286,6 @@ export const BIOME_PT = {
   swamp: "Pântano",
   lake: "Lago",
   industrial: "Área Industrial"
-
-
-// --- Arena titles (UI) ---
-export const ARENA_TITLES = {
-  regular: "Survival Arena",
-
-  glacier: "Himani Arena",
-  tundra: "Kunlun Arena",
-  mountain: "Orqo Arena",
-  desert: "Sahari Arena",
-  caatinga: "Baraúna Arena",
-  savanna: "Savanaari Arena",
-  plains: "Pampaari Arena",
-  woods: "Aranya Arena",
-  forest: "Ka’aguay Arena",
-  jungle: "Yvapurũ Arena",
-  fairy: "Tianxian Arena",
-  swamp: "Pantanari Arena",
-  lake: "Mayu Arena",
-  industrial: "Karkhan Arena"
-};
-
 };
 
 export const PALETTES = [
@@ -332,9 +329,14 @@ function cellAtPoint(cells, x, y){
 export function generateMapData({ seed, regions, width=820, height=820, paletteIndex=0 }){
   const rng = mulberry32(seed);
 
-  // 20% chance de arena temática
-  const themed = rng.next() < 0.20;
-  const dominantBiome = themed ? rng.pick(BIOMES) : null;
+  // 20% chance of a thematic arena.
+  // When thematic: 75% of zones share a dominant biome; the remaining 25% are assigned normally
+  // but only among the other biomes (dominant excluded).
+  const isThematic = rng.next() < 0.20;
+  const dominantBiome = isThematic ? rng.pick(BIOMES) : null;
+  const arenaName = isThematic
+    ? (ARENA_NAME_BY_BIOME[dominantBiome] || ARENA_NAME_BY_BIOME.regular)
+    : ARENA_NAME_BY_BIOME.regular;
 
   const W = width, H = height;
   const CX = W/2, CY = H/2;
@@ -408,87 +410,30 @@ export function generateMapData({ seed, regions, width=820, height=820, paletteI
     adj.set(id, set);
   }
 
+  // --- Biomes ---
+  if (!isThematic){
+    // Regular (existing behavior): score + quotas
+    const counts = {};
+    for(const b of BIOMES) counts[b] = 0;
 
-  // themed arena: força ~75% das áreas (exceto a #1) para o bioma dominante
-  let forcedDominantIds = null;
-  if (themed && dominantBiome){
-    const total = cells.length;
-    const targetCount = Math.floor(total * 0.75);
+    // pass 1
+    for(const cell of cells){
+      if (cell.id === 1){
+        cell.biome = "fairy";
+        counts.fairy++;
+        continue;
+      }
+      const scores = biomeScores(cell.features);
+      const allowed = new Set();
+      for(const b of BIOMES) if(counts[b] < QUOTAS[b].max) allowed.add(b);
 
-    const scored = cells
-      .filter(c => c.id !== 1)
-      .map(c => {
-        const sc = biomeScores(c.features);
-        return { id: c.id, score: sc[dominantBiome] || 0 };
-      })
-      .sort((a,b)=> b.score - a.score);
-
-    forcedDominantIds = new Set(scored.slice(0, targetCount).map(x => x.id));
-  }
-
-  // biomes with quotas
-  const counts = {};
-  for(const b of BIOMES) counts[b] = 0;
-  // --- Arena theming (20% chance): ~75% of cells become one dominant biome ---
-  const isThemedArena = rng.next() < 0.20;
-  const dominantBiome = isThemedArena ? pick(BIOMES, rng) : null;
-
-  if (isThemedArena && dominantBiome){
-    const targetCount = Math.floor(cells.length * 0.75);
-    const scored = cells
-      .filter(c => c.id !== 1)
-      .map(c => {
-        const sc = biomeScores(c.features);
-        return { cell: c, score: sc[dominantBiome] || 0 };
-      })
-      .sort((a,b)=> b.score - a.score);
-
-    for (let i = 0; i < targetCount && i < scored.length; i++){
-      scored[i].cell.biome = dominantBiome;
-    }
-  }
-
-
-
-  // pass 1
-  for(const cell of cells){
-    // arena temática pode pré-fixar biomas; preserva e só contabiliza
-    if (cell.id !== 1 && cell.biome && cell.biome !== "plains"){
-      counts[cell.biome] = (counts[cell.biome] || 0) + 1;
-      continue;
-    }
-    if (cell.id === 1){
-      // área inicial especial
-      cell.biome = "fairy";
-      counts.fairy++;
-      continue;
+      let biome = pickBiomeByScore(scores, rng, allowed);
+      if (!allowed.has(biome)) biome = "plains";
+      cell.biome = biome;
+      counts[biome]++;
     }
 
-    // arenas temáticas: ~75% das áreas são do bioma dominante
-    if (themed && dominantBiome && forcedDominantIds?.has(cell.id)){
-      cell.biome = dominantBiome;
-      counts[dominantBiome] = (counts[dominantBiome] || 0) + 1;
-      continue;
-    }
-
-    const scores = biomeScores(cell.features);
-
-    // allowed biomes (respeita máximos; em arena temática, o restante exclui o dominante)
-    const allowed = new Set();
-    for(const b of BIOMES){
-      if (themed && dominantBiome && b === dominantBiome) continue;
-      if(counts[b] < QUOTAS[b].max) allowed.add(b);
-    }
-
-    let biome = pickBiomeByScore(scores, rng, allowed);
-    if (!allowed.has(biome)) biome = "plains";
-    cell.biome = biome;
-    counts[biome]++;
-  }
-
-  // pass 2 ensure mins (simple)
-  // Em arenas temáticas, não forçamos mínimos para não destruir a dominância (~75%).
-  if (!themed){
+    // pass 2 ensure mins (simple)
     const needs = [];
     for(const b of BIOMES){
       const deficit = QUOTAS[b].min - counts[b];
@@ -535,6 +480,44 @@ export function generateMapData({ seed, regions, width=820, height=820, paletteI
         deficit--;
       }
     }
+  } else {
+    // Thematic: dominant biome covers 75% of zones.
+    // Remaining 25% are assigned by current scoring logic but excluding the dominant biome.
+    const dominantCount = Math.floor(regions * 0.75);
+    const otherCountTotal = Math.max(0, regions - dominantCount);
+
+    // Area 1 remains special (fairy). It counts as "other" unless dominantBiome is fairy.
+    const otherIncludesArea1 = (dominantBiome !== "fairy");
+    const remainingOther = Math.max(0, otherCountTotal - (otherIncludesArea1 ? 1 : 0));
+
+    // Pick which non-1 cells will be "other".
+    const candidates = cells.filter(c => c.id !== 1);
+    // Fisher–Yates shuffle with deterministic RNG
+    for(let i=candidates.length-1; i>0; i--){
+      const j = Math.floor(rng.next() * (i+1));
+      const tmp = candidates[i];
+      candidates[i] = candidates[j];
+      candidates[j] = tmp;
+    }
+    const otherSet = new Set(candidates.slice(0, remainingOther).map(c => c.id));
+
+    const allowedOther = new Set(BIOMES.filter(b => b !== dominantBiome));
+
+    for (const cell of cells){
+      if (cell.id === 1){
+        cell.biome = "fairy";
+        continue;
+      }
+      if (!otherSet.has(cell.id)){
+        cell.biome = dominantBiome;
+        continue;
+      }
+
+      const scores = biomeScores(cell.features);
+      let biome = pickBiomeByScore(scores, rng, allowedOther);
+      if (!allowedOther.has(biome)) biome = "plains";
+      cell.biome = biome;
+    }
   }
 
   // colors + base water flags
@@ -569,7 +552,10 @@ export function generateMapData({ seed, regions, width=820, height=820, paletteI
       id: c.id,
       biome: c.biome,
       color: c.fillColor,
-      hasWater: !!c.hasWater
+      hasWater: !!c.hasWater,
+      // v0: allow traversal across water by treating all water areas as having a bridge.
+      // Keeps the "bridge" mechanic for later without restricting movement now.
+      hasBridge: !!c.hasWater
     };
     adjById[String(c.id)] = Array.from(adj.get(c.id) || []).sort((a,b)=>a-b);
   }
@@ -586,19 +572,14 @@ export function generateMapData({ seed, regions, width=820, height=820, paletteI
     river: { points: river.points, cellIds: Array.from(riverCellIds) }
   };
 
-  const arenaTitle = themed
-    ? (ARENA_TITLES[dominantBiome] || ARENA_TITLES.regular)
-    : ARENA_TITLES.regular;
-
   return {
     areasById,
     adjById,
     uiGeom,
-    arena: {
-      themed,
-      biome: dominantBiome,
-      title: arenaTitle
-    }
+    arenaName,
+    // kept for debugging/UI if needed later; no gameplay logic depends on this
+    dominantBiome: dominantBiome || null,
+    isThematic
   };
 }
 
