@@ -131,25 +131,6 @@ const BIOMES = [
   "fairy","swamp","lake","industrial"
 ];
 
-// --- Arena names (UI) ---
-// When the arena is not thematic, the UI should show "Survival Arena".
-const ARENA_NAMES_BY_BIOME = {
-  glacier: "Himani Arena",
-  tundra: "Kunlun Arena",
-  mountain: "Orqo Arena",
-  desert: "Sahari Arena",
-  caatinga: "Baraúna Arena",
-  savanna: "Savanaari Arena",
-  plains: "Pampaari Arena",
-  woods: "Aranya Arena",
-  forest: "Ka’aguay Arena",
-  jungle: "Yvapurũ Arena",
-  fairy: "Tianxian Arena",
-  swamp: "Pantanari Arena",
-  lake: "Mayu Arena",
-  industrial: "Karkhan Arena"
-};
-
 const QUOTAS = {
   glacier:    { min: 1, max: 8 },
   tundra:     { min: 1, max: 8 },
@@ -166,6 +147,41 @@ const QUOTAS = {
   lake:       { min: 1, max: 10 },
   industrial: { min: 1, max: 8 }
 };
+
+const ARENA_NAME_BY_BIOME = {
+  glacier: "Himani Arena",
+  tundra: "Kunlun Arena",
+  mountain: "Orqo Arena",
+  desert: "Sahari Arena",
+  caatinga: "Baraúna Arena",
+  savanna: "Savanaari Arena",
+  plains: "Pampaari Arena",
+  woods: "Aranya Arena",
+  forest: "Ka’aguay Arena",
+  jungle: "Yvapurũ Arena",
+  fairy: "Tianxian Arena",
+  swamp: "Pantanari Arena",
+  lake: "Mayu Arena",
+  industrial: "Karkhan Arena"
+};
+
+const REGULAR_ARENA_NAME = "Survival Arena";
+const THEMATIC_ARENA_CHANCE = 0.20;
+
+function weightedPick(items, rng){
+  // items: Array<[key, weight]>
+  let sum = 0;
+  for (const [,w] of items) sum += max0(w);
+  if (sum <= 0) return items[0][0];
+  let r = rng.next() * sum;
+  for (const [k,w] of items){
+    r -= max0(w);
+    if (r <= 0) return k;
+  }
+  return items[items.length - 1][0];
+}
+
+function max0(x){ return x > 0 ? x : 0; }
 
 function biomeScores(f){
   const t = f.temp, m = f.moist, a = f.alt, g = f.magic, u = f.urban;
@@ -328,11 +344,6 @@ function cellAtPoint(cells, x, y){
 
 export function generateMapData({ seed, regions, width=820, height=820, paletteIndex=0 }){
   const rng = mulberry32(seed);
-  // IMPORTANT: keep the existing RNG stream for geometry/biomes untouched when the arena
-  // is not thematic. We use a separate RNG derived from the same seed for the theme roll.
-  const themeRng = mulberry32(seed ^ 0xA9F1D3B);
-  const isThematic = themeRng.next() < 0.20;
-  const dominantBiome = isThematic ? themeRng.pick(BIOMES) : null;
 
   const W = width, H = height;
   const CX = W/2, CY = H/2;
@@ -475,81 +486,56 @@ export function generateMapData({ seed, regions, width=820, height=820, paletteI
     }
   }
 
-  // --- Thematic arena rule ---
-  // 20% chance: 75% of the zones (excluding the special area id=1) become a dominant biome.
-  // The remaining 25% keep the current generation logic (already applied above), except that
-  // they must not be the dominant biome.
-  if (isThematic && dominantBiome){
-    // current counts
-    const countsNow = {};
-    for (const b of BIOMES) countsNow[b] = 0;
-    for (const cell of cells){
-      if (cell.biome && countsNow[cell.biome] != null) countsNow[cell.biome]++;
+
+  // 20%: thematic arena (dominant biome takes 3/4 of zones)
+  let arenaName = REGULAR_ARENA_NAME;
+  const isThematic = rng.next() < THEMATIC_ARENA_CHANCE;
+  if (isThematic){
+    // pick dominant biome (weighted by how much it already appears, excluding the forced fairy at id=1)
+    const weights = [];
+    for (const b of BIOMES){
+      const w = (b === "fairy") ? Math.max(0, (counts[b] || 0) - 1) : (counts[b] || 0);
+      weights.push([b, 1 + w]);
     }
+    const dominant = weightedPick(weights, rng) || "plains";
+    arenaName = ARENA_NAME_BY_BIOME[dominant] || REGULAR_ARENA_NAME;
 
-    const candidates = cells.filter(c => c.id !== 1);
-    const targetDominant = Math.ceil(candidates.length * 0.75);
+    const pool = cells.filter(c => c.id !== 1);
+    const targetDominant = Math.floor(pool.length * 0.75);
 
-    const scoreFor = (cell, biome) => {
-      const sc = biomeScores(cell.features);
-      return sc[biome] || 0;
-    };
+    // choose the cells most compatible with the dominant biome
+    pool.sort((a,b)=>{
+      const sa = biomeScores(a.features)[dominant] || 0;
+      const sb = biomeScores(b.features)[dominant] || 0;
+      return sb - sa;
+    });
 
-    // Helper to repick a non-dominant biome, using the existing scoring system.
-    const repickNonDominant = (cell) => {
+    const dominantSet = new Set(pool.slice(0, targetDominant).map(c => c.id));
+
+    // reset counts and re-assign
+    for (const b of BIOMES) counts[b] = 0;
+    for (const cell of cells){
+      if (cell.id === 1){
+        cell.biome = "fairy";
+        counts.fairy++;
+        continue;
+      }
+      if (dominantSet.has(cell.id)){
+        cell.biome = dominant;
+        counts[dominant] = (counts[dominant] || 0) + 1;
+        continue;
+      }
+
       const scores = biomeScores(cell.features);
       const allowed = new Set();
       for (const b of BIOMES){
-        if (b === dominantBiome) continue;
-        if ((countsNow[b] ?? 0) < QUOTAS[b].max) allowed.add(b);
+        if (b === dominant) continue;
+        if (counts[b] < QUOTAS[b].max) allowed.add(b);
       }
-      // If we are fully saturated by max quotas, fall back to anything except dominant.
-      if (!allowed.size){
-        for (const b of BIOMES) if (b !== dominantBiome) allowed.add(b);
-      }
-      const nextBiome = pickBiomeByScore(scores, rng, allowed);
-      return nextBiome === dominantBiome ? "plains" : nextBiome;
-    };
-
-    // Step 1: If we have more dominant than target, demote the weakest matches.
-    let dominantCells = candidates.filter(c => c.biome === dominantBiome);
-    if (dominantCells.length > targetDominant){
-      dominantCells
-        .map(c => ({ c, s: scoreFor(c, dominantBiome) }))
-        .sort((a,b)=> a.s - b.s)
-        .slice(0, dominantCells.length - targetDominant)
-        .forEach(({ c }) => {
-          countsNow[dominantBiome]--;
-          const newBiome = repickNonDominant(c);
-          c.biome = newBiome;
-          countsNow[newBiome] = (countsNow[newBiome] ?? 0) + 1;
-        });
-    }
-
-    // Step 2: If we have fewer dominant than target, promote the strongest matches.
-    dominantCells = candidates.filter(c => c.biome === dominantBiome);
-    if (dominantCells.length < targetDominant){
-      const needed = targetDominant - dominantCells.length;
-      candidates
-        .filter(c => c.biome !== dominantBiome)
-        .map(c => ({ c, s: scoreFor(c, dominantBiome) }))
-        .sort((a,b)=> b.s - a.s)
-        .slice(0, needed)
-        .forEach(({ c }) => {
-          countsNow[c.biome]--;
-          c.biome = dominantBiome;
-          countsNow[dominantBiome] = (countsNow[dominantBiome] ?? 0) + 1;
-        });
-    }
-
-    // Step 3: Ensure the remaining 25% are not dominant.
-    for (const cell of candidates){
-      if (cell.biome === dominantBiome) continue;
-      // If any non-dominant accidentally equals dominant (shouldn't), repick.
-      if (cell.biome === dominantBiome){
-        const newBiome = repickNonDominant(cell);
-        cell.biome = newBiome;
-      }
+      let biome = pickBiomeByScore(scores, rng, allowed);
+      if (!allowed.has(biome)) biome = "plains";
+      cell.biome = biome;
+      counts[biome] = (counts[biome] || 0) + 1;
     }
   }
 
@@ -585,7 +571,10 @@ export function generateMapData({ seed, regions, width=820, height=820, paletteI
       id: c.id,
       biome: c.biome,
       color: c.fillColor,
-      hasWater: !!c.hasWater
+      hasWater: !!c.hasWater,
+      // v0: allow traversal across water by treating all water areas as having a bridge.
+      // Keeps the "bridge" mechanic for later without restricting movement now.
+      hasBridge: !!c.hasWater
     };
     adjById[String(c.id)] = Array.from(adj.get(c.id) || []).sort((a,b)=>a-b);
   }
@@ -601,10 +590,6 @@ export function generateMapData({ seed, regions, width=820, height=820, paletteI
     })),
     river: { points: river.points, cellIds: Array.from(riverCellIds) }
   };
-
-  const arenaName = isThematic
-    ? (ARENA_NAMES_BY_BIOME[dominantBiome] || "Survival Arena")
-    : "Survival Arena";
 
   return { areasById, adjById, uiGeom, arenaName };
 }
