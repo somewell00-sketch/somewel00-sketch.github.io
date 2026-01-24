@@ -1154,6 +1154,9 @@ export function endDay(world, npcIntents = [], dayEvents = []){
   const seed = next.meta.seed;
   const events = [...(dayEvents || [])];
 
+  const __push = events.push.bind(events);
+  events.push = (e) => __push(Object.assign({ phase: "endDay" }, e || {}));
+
   // Tracks which actors participated in an item-dispute fight this day.
   // Those actors should reserve their strongest weapon for the dispute,
   // using their second-strongest weapon (if available) for any regular attack

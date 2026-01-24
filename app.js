@@ -1739,7 +1739,7 @@ function renderGame(){
     }
     if(anyDeath) return true;
 
-    const rolloverDamage = evs.some(e => e && e.who === "player" && ["POISON_TICK","MINE_HIT","CREATURE_ATTACK"].includes(e.type) && Number(e.dmg || 0) > 0);
+    const rolloverDamage = evs.some(e => e && e.phase === "endDay" && e.who === "player" && ["POISON_TICK","MINE_HIT","CREATURE_ATTACK"].includes(e.type) && Number(e.dmg || 0) > 0);
     return rolloverDamage;
   }
 }
