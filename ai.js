@@ -89,10 +89,18 @@ function decidePosture(world, npc, obs, traits, { seed, day, playerDistrict }){
   const hasWater = !!area?.hasWater;
   const ground = Array.isArray(area?.groundItems) ? area.groundItems : [];
 
-  // FORCE_COLLECT_CORN: early Cornucopia scramble.
-  // On day 1–2, if the Cornucopia has loot and the NPC has inventory space,
-  // prioritize collecting over fighting/defending.
-  if(Number(area?.id) === 1 && day <= 2 && ground.length && invN < INVENTORY_LIMIT){
+  // FORCE_COLLECT_CORN: Cornucopia scramble.
+  // Cornucopia starts with lots of finite loot. If an NPC still has space,
+  // it should keep trying to collect there (especially early), otherwise
+  // the ground ends up cluttered with untouched items.
+  const inCorn = Number(area?.id) === 1;
+  if(inCorn && ground.length && invN < INVENTORY_LIMIT){
+    // Strong push to collect on day 1–3.
+    const baseChance = (day <= 3) ? 0.92 : 0.55;
+    // If they have 0–1 items, they are still gearing up.
+    const invBoost = (invN <= 1) ? 0.25 : 0;
+    const rForce = hash01(seed, day, `corn_collect|${npc.id}|${invN}|${ground.length}`);
+    if(rForce < Math.min(0.98, baseChance + invBoost)){
     const scoredItems = [];
     for(let i=0;i<ground.length;i++){
       const inst = ground[i];
@@ -105,6 +113,7 @@ function decidePosture(world, npc, obs, traits, { seed, day, playerDistrict }){
     const pickPos = Math.floor(r * topK.length);
     const chosen = topK[Math.max(0, Math.min(topK.length - 1, pickPos))];
     return { source: npc.id, type: "COLLECT", payload: { itemIndex: chosen.idx } };
+    }
   }
 
   // Hunger/FP: if low and water exists, prefer drinking.
@@ -273,8 +282,10 @@ const adjustedStayScore = stayScore + stayBias;
   const emptyHere = hereGround.length === 0;
 
   // If the current area is empty, strongly encourage moving.
-  // If in Cornucopia, start leaving after getting at least 1 item.
-  const forceMove = emptyHere || (Number(start) === 1 && invCount >= 1);
+  // Cornucopia: don't force early dispersal too fast or most loot will never be contested.
+  // Start forcing dispersal only after getting at least 2 items, and only when the pile is small.
+  const cornLootLow = (Number(start) === 1) && (hereGround.length <= 6);
+  const forceMove = emptyHere || (Number(start) === 1 && invCount >= 2 && cornLootLow);
 
   const moveThreshold = (0.14 + traits.caution * 0.10) + (invCount === 0 && Number(start) === 1 ? 0.06 : 0) - (invCount >= 2 ? 0.06 : 0);
   const canMove = forceMove || scored.some(s => !s.isStay && (s.score - adjustedStayScore) >= moveThreshold);
@@ -416,6 +427,8 @@ function fearFactor(npc){
 
 function itemValue(def, inst){
   if(!def) return 0.05;
+  // Backpacks are extremely valuable because they explode into 2–3 items.
+  if(def.id === "backpack") return 0.98;
   if(def.type === ItemTypes.PROTECTION) return 0.9;
   if(def.type === ItemTypes.CONSUMABLE) return 0.7;
   if(def.type === ItemTypes.WEAPON){

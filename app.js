@@ -1580,9 +1580,16 @@ function renderGame(){
     };
 
     const arrivals = (events || []).filter(e => e.type === "ARRIVAL" && e.to === pArea);
-    const deaths = (events || []).filter(e => e.type === "DEATH" && e.who && e.who !== "player");
-    const cannonCount = deaths.length;
-    const deadNames = deaths.map(d => npcName(d.who));
+    // Deaths: prefer event log, but also support compound events like MINE_BLAST.
+    const deadIds = new Set();
+    for(const e of (events || [])){
+      if(e?.type === "DEATH" && e.who && e.who !== "player") deadIds.add(e.who);
+      if(e?.type === "MINE_BLAST" && Array.isArray(e.dead)){
+        for(const id of e.dead){ if(id && id !== "player") deadIds.add(id); }
+      }
+    }
+    const deadNames = Array.from(deadIds).map(id => npcName(id));
+    const cannonCount = deadNames.length;
     const hereNow = Object.values(world.entities.npcs || {})
       .filter(n => (n.hp ?? 0) > 0 && n.areaId === pArea)
       .map(n => n.name);
