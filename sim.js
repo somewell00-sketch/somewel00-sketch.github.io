@@ -1017,12 +1017,6 @@ export function commitPlayerAction(world, action){
       const startAreas = { player: player.areaId };
       for(const npc of Object.values(next.entities.npcs || {})) startAreas[npc.id] = npc.areaId;
 
-  // RESET_TODAY_FLAGS: clear per-day flags (defend/invisible/fed/etc.).
-  for(const e of [next.entities.player, ...Object.values(next.entities.npcs || {})]){
-    if(!e) continue;
-    e._today = {};
-  }
-
       const fight = resolveTieFight(next, best.map(b=>b.id), area.id, { seed, day, killsThisDay: (next.flags?.killsThisDay || (next.flags.killsThisDay=[])), itemDefId: item.defId, startAreas });
       winnerId = fight.winner || null;
       events.push({ type:"GROUND_CONTEST", areaId: area.id, itemDefId: item.defId, outcome:"tie_fight", tied: best.map(b=>b.id), winner: winnerId });

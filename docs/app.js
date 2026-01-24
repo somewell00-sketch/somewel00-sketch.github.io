@@ -1576,6 +1576,20 @@ function renderGame(){
     const out = [];
     for(const e of (events || [])){
       switch(e.type){
+        case "USE_ITEM": {
+          if(e.ok){
+            const def = getItemDef(e.itemDefId);
+            const nm = def?.name || e.itemDefId;
+            out.push(`You used ${nm}.`);
+          } else {
+            out.push("You tried to use an item, but it failed.");
+          }
+          break;
+        }
+        case "INVISIBLE": {
+          if(e.who === "player") out.push("You are camouflaged for the day.");
+          break;
+        }
         case "ATTACK": {
           if(e.ok){
             const weap = e.weapon ? ` with ${e.weapon}` : "";
