@@ -1024,6 +1024,12 @@ export function endDay(world, npcIntents = [], dayEvents = []){
   const seed = next.meta.seed;
   const events = [...(dayEvents || [])];
 
+  // Tracks which actors participated in an item-dispute fight this day.
+  // Those actors should reserve their strongest weapon for the dispute,
+  // using their second-strongest weapon (if available) for any regular attack
+  // they declared that same day.
+  const disputeStrongestUsers = new Set();
+
   // Collect kill records accumulated during the day (e.g., from manual attacks).
   // Used for deterministic loot distribution.
   const killsThisDay = Array.isArray(next.flags?.killsThisDay) ? next.flags.killsThisDay : [];
@@ -1356,7 +1362,6 @@ export function endDay(world, npcIntents = [], dayEvents = []){
     }
   }
 
-  const disputeStrongestUsers = new Set();
   resolveCollectContests(next, collectReqs, events, { seed, day, killsThisDay, startAreas, attackTargets, disputeStrongestUsers });
 
 
