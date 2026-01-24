@@ -125,7 +125,7 @@ function applyHighlyNoisyHostileEvents(world, events, { seed, day }){
     const target = ents[idx] || ents[0];
     const dmg = 12 + Math.floor(prng(seed + 121, day, `highly_noisy_dmg_${area.id}`) * 14); // 12..25
     applyDamage(target, dmg);
-    events.push({ type:"HOSTILE_EVENT", who: target.id, areaId: area.id, dmg, note:"highly_noisy" });
+    events.push({ type:"HOSTILE_EVENT", who: target.id, areaId: area.id, dmg, note:"highly_noisy", phase:"endDay" });
     if((target.hp ?? 0) <= 0) events.push({ type:"DEATH", who: target.id, areaId: area.id, reason:"hostile_event" });
   }
 }
@@ -143,7 +143,7 @@ function applyLaserStagnation(world, events){
   if(st !== NOISE.NOISY && st !== NOISE.HIGHLY) return;
 
   applyDamage(p, 10);
-  events.push({ type:"LASER", who:"player", areaId: p.areaId, dmg: 10, text:"The arena is aiming at me." });
+  events.push({ type:"LASER", who:"player", areaId: p.areaId, dmg: 10, text:"The arena is aiming at me.", phase:"endDay" });
   if((p.hp ?? 0) <= 0) events.push({ type:"DEATH", who:"player", areaId: p.areaId, reason:"laser" });
 }
 
@@ -1921,11 +1921,6 @@ export function endDay(world, npcIntents = [], dayEvents = []){
       events.push({ type:"ARRIVAL", who: npc.id, from, to });
     }
   }
-
-  // --- Territory noise update + Highly Noisy events + Laser ---
-  updateAreaNoise(next, events, { seed, day });
-  applyHighlyNoisyHostileEvents(next, events, { seed, day });
-  applyLaserStagnation(next, events);
 
   // --- Territory noise + Highly Noisy events + laser (end-of-day) ---
   updateAreaNoise(next, events, { seed, day });

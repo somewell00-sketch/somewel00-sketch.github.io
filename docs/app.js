@@ -1750,12 +1750,12 @@ function renderGame(){
     const deadNames = Array.from(deadIds).map(id => npcName(id));
     const cannonCount = deadNames.length;
 
-    // Player damage during the day rollover (poison ticks, mines, daily threats, etc.).
+    // Player damage during the day rollover (poison ticks, mines, daily threats, laser, etc.).
     const rolloverDmg = (events || []).filter(e => {
       if(!e) return false;
       if(e.who !== "player") return false;
       // These events occur during endDay() / new-day processing (not from the player's commit UI).
-      return ["POISON_TICK","MINE_HIT","CREATURE_ATTACK"].includes(e.type);
+      return ["POISON_TICK","MINE_HIT","CREATURE_ATTACK","HOSTILE_EVENT","LASER"].includes(e.type);
     });
 
     const dmgLines = [];
@@ -1763,6 +1763,8 @@ function renderGame(){
       if(e.type === "POISON_TICK") dmgLines.push(`Poison dealt ${e.dmg} damage.`);
       else if(e.type === "MINE_HIT") dmgLines.push(`A mine dealt ${e.dmg} damage.`);
       else if(e.type === "CREATURE_ATTACK") dmgLines.push(`${e.creature} attacked you for ${e.dmg} damage.`);
+      else if(e.type === "HOSTILE_EVENT") dmgLines.push(`Something attacked you in the chaos (${e.dmg} damage).`);
+      else if(e.type === "LASER") dmgLines.push(e.text ? String(e.text) : `A laser struck you for ${e.dmg} damage.`);
     }
 
     // Perception-based world feedback (tactical, but diegetic).
@@ -1857,7 +1859,7 @@ function renderGame(){
     }
     if(anyDeath) return true;
 
-    const rolloverDamage = evs.some(e => e && e.phase === "endDay" && e.who === "player" && ["POISON_TICK","MINE_HIT","CREATURE_ATTACK"].includes(e.type) && Number(e.dmg || 0) > 0);
+    const rolloverDamage = evs.some(e => e && e.who === "player" && ["POISON_TICK","MINE_HIT","CREATURE_ATTACK","HOSTILE_EVENT","LASER"].includes(e.type) && Number(e.dmg || 0) > 0);
     return rolloverDamage;
   }
 }

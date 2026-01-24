@@ -345,7 +345,8 @@ function scoreArea(world, npc, areaId, steps, traits, visitedSet, { seed, day })
   // Early Cornucopia: allow crowding so more NPCs contest loot.
   if(Number(areaId) === 1 && day === 1) crowdPenalty *= 0.2;
 
-  const fpNow = Number(npc.fp ?? 0);
+  // FP defaults to full if missing (older saves / initial generation).
+  const fpNow = Number(npc.fp ?? 100);
   let needFood = clamp01((40 - fpNow) / 40);
   if(fpNow <= 20) needFood = Math.min(1, needFood + 0.35);
   const safety = (a.threatClass === "safe" ? 0.45 : (a.threatClass === "neutral" ? 0.2 : -0.25));
