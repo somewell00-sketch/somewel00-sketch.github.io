@@ -258,17 +258,29 @@ const visitedSet = new Set(Array.isArray(npc.memory?.visited) ? npc.memory.visit
   const bestScore = scored[0]?.score ?? stayScore;
 
 
-// Dispersal rule (Cornucopia + general):
-// 0 items -> tends to stay and fight for loot
-// 1 item  -> starts considering leaving
-// 2+ items -> strongly prefers leaving
+// Dispersal rule (Cornucopia + general)
+// We want variety:
+// - some NPCs rush out with 0 items
+// - some leave after 1 item
+// - some stay for 2+ items
+// This is deterministic (seed/day/id), so replays match.
 const invCount = inventoryCount(npc.inventory);
+
+// Loot target for the Cornucopia phase (0/1/2).
+// Higher greed -> higher target, higher caution -> lower target.
+const ltBase = hash01(seed, day, `loot_target|${npc.id}`);
+let lootTarget = (ltBase < 0.18) ? 0 : (ltBase < 0.62 ? 1 : 2);
+lootTarget = clampInt(lootTarget + (traits.greed > 0.65 ? 1 : 0) - (traits.caution > 0.65 ? 1 : 0), 0, 2);
+
 let stayBias = 0;
 if(Number(start) === 1){
-  if(invCount === 0) stayBias = +0.22;
-  else if(invCount === 1) stayBias = -0.28;
-  else stayBias = -0.55;
+  // Cornucopia: bias depends on whether they've reached their target.
+  // If target is 0, they are "ready" to move immediately.
+  if(invCount < lootTarget) stayBias = +0.18;        // stay and fight for loot
+  else if(invCount === lootTarget) stayBias = -0.22; // start leaving pressure
+  else stayBias = -0.45;                              // strong dispersal
 } else {
+  // Outside Cornucopia: with some gear, wandering becomes more likely.
   if(invCount >= 2) stayBias = -0.12;
 }
 const adjustedStayScore = stayScore + stayBias;
@@ -282,12 +294,23 @@ const adjustedStayScore = stayScore + stayBias;
   const emptyHere = hereGround.length === 0;
 
   // If the current area is empty, strongly encourage moving.
-  // Cornucopia: don't force early dispersal too fast or most loot will never be contested.
-  // Start forcing dispersal only after getting at least 2 items, and only when the pile is small.
-  const cornLootLow = (Number(start) === 1) && (hereGround.length <= 6);
-  const forceMove = emptyHere || (Number(start) === 1 && invCount >= 2 && cornLootLow);
+  // Cornucopia dispersal:
+  // - if an NPC has already reached their loot target, they may choose to leave even while loot remains.
+  // - if the pile is small, encourage dispersal harder.
+  const inCorn = Number(start) === 1;
+  const reachedTarget = inCorn && (invCount >= lootTarget);
+  const cornLootLow = inCorn && (hereGround.length <= 6);
 
-  const moveThreshold = (0.14 + traits.caution * 0.10) + (invCount === 0 && Number(start) === 1 ? 0.06 : 0) - (invCount >= 2 ? 0.06 : 0);
+  // Some NPCs will decide to leave earlier (even with 0 items) based on their target.
+  // We still keep movement deterministic.
+  const earlyLeaveRoll = hash01(seed, day, `corn_leave|${npc.id}`);
+  const earlyLeave = inCorn && reachedTarget && (earlyLeaveRoll < (0.45 - traits.greed * 0.25 + traits.caution * 0.15));
+
+  const forceMove = emptyHere || earlyLeave || (inCorn && reachedTarget && cornLootLow);
+
+  // If they are "done" with the Cornucopia, lower the threshold so movement happens more often.
+  const doneCorn = (Number(start) === 1) && (invCount >= lootTarget);
+  const moveThreshold = (0.14 + traits.caution * 0.10) + (invCount === 0 && Number(start) === 1 ? 0.06 : 0) - (invCount >= 2 ? 0.06 : 0) - (doneCorn ? 0.06 : 0);
   const canMove = forceMove || scored.some(s => !s.isStay && (s.score - adjustedStayScore) >= moveThreshold);
   if(!canMove) return { source: npc.id, type: "STAY", payload: {} };
 
@@ -477,4 +500,11 @@ function clamp01(x){
   if(x <= 0) return 0;
   if(x >= 1) return 1;
   return x;
+}
+
+function clampInt(x, min, max){
+  const n = Math.floor(Number(x));
+  if(n < min) return min;
+  if(n > max) return max;
+  return n;
 }
