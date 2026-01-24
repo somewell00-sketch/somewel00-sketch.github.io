@@ -476,70 +476,8 @@ function startNewGame(mapSize, totalPlayers, playerDistrict, playerAttrs){
 function renderGame(){
   root.innerHTML = `
     <div class="app">
-      <!-- LEFT: gameplay (actions + entities in your current area) -->
-      <aside class="panel" id="leftPanel">
-        <div class="panelHeader">
-          <div class="h1" style="margin:0;">${(world && world.map && world.map.arenaName) ? world.map.arenaName : "Survival Arena"}</div>
-          <div class="muted small">Day <span id="day"></span> • Area <span id="curArea"></span></div>
-        </div>
 
-        <div id="leftAlert" class="alert hidden">—</div>
-
-        <div id="needsAction" class="section">
-          <div class="banner">
-            You must perform an action in this area before moving to the next one.
-          </div>
-
-          <div class="muted" style="margin-top:12px;">Players in the area</div>
-          <div id="areaPills" class="pillWrap" style="margin-top:8px;"></div>
-
-          <div id="groundItemWrap" class="hidden" style="margin-top:12px;">
-            <div class="muted">Items on the ground</div>
-            <div id="groundItemPills" class="pillWrap" style="margin-top:8px;"></div>
-          </div>
-
-          <div class="row" style="margin-top:12px; gap:8px; flex-wrap:wrap;">
-            <button id="btnDefend" class="btn blue" style="flex:1; min-width:120px;">Defend</button>
-            <button id="btnNothing" class="btn ghost" style="flex:1; min-width:120px;">Nothing</button>
-            <button id="btnDrink" class="btn teal hidden" style="flex:1; min-width:120px;" data-tooltip="Restore 5 FP by drinking water">Drink water</button>
-            <button id="btnSetNet" class="btn purple hidden" style="flex:1; min-width:120px;" data-tooltip="Set a Net trap here (activates tomorrow)">Set Net</button>
-            <button id="btnSetMine" class="btn orange hidden" style="flex:1; min-width:120px;" data-tooltip="Set a Mine trap here (activates tomorrow)">Set Mine</button>
-            <button id="btnAttack" class="btn red hidden" style="flex:1; min-width:120px;">Attack</button>
-            <button id="btnCollect" class="btn hidden" style="flex:1; min-width:120px;" data-tooltip="Pick up the selected item">Collect item</button>
-          </div>
-
-          <div class="muted small" style="margin-top:8px;">Moves left today: <span id="movesLeft"></span></div>
-        </div>
-
-        <div id="exploreState" class="section hidden">
-          <div class="banner">
-            You survived another day. You may move and then end the day.
-          </div>
-          <div class="row" style="margin-top:12px;">
-            <button id="btnEndDay" class="btn green" style="width:100%; padding:12px 14px;">End Day</button>
-          </div>
-          <div class="muted small" style="margin-top:8px;">Moves left today: <span id="movesLeft2"></span></div>
-        </div>
-
-        <div id="trappedState" class="section hidden">
-          <div class="banner danger">
-            You are trapped in a Net. You cannot act or move for <span id="trapDays"></span> day(s).
-          </div>
-          <div class="muted" style="margin-top:10px;">You can only escape by cutting the net with a Dagger.</div>
-          <div class="row" style="margin-top:12px; gap:8px; flex-wrap:wrap;">
-            <button id="btnCutNet" class="btn red hidden" style="flex:1; min-width:160px;" data-tooltip="Consume 1 Dagger to escape">Cut net (Dagger)</button>
-            <button id="btnEndDayTrapped" class="btn green" style="flex:1; min-width:160px;">End Day</button>
-          </div>
-        </div>
-      </aside>
-
-      <main class="canvasWrap">
-        <canvas id="c" width="820" height="820"></canvas>
-        <div id="areaInfo" class="areaInfo">—</div>
-        <div class="hint">Cornucopia is Area 1 • Select an area to inspect • Move only after committing an action</div>
-      </main>
-
-      <!-- RIGHT: player inventory + debug -->
+      <!-- LEFT: player inventory + debug -->
       <aside class="panel" id="rightPanel">
         <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:6px;">
           <div class="h1" style="margin:0; display:flex; align-items:center; gap:8px;">YOU <span id="youPoison" class="poisonIcon hidden" title="Poisoned">☠</span></div>
@@ -611,7 +549,69 @@ function renderGame(){
           </div>
         </div>
       </aside>
-    </div>
+    <main class="canvasWrap">
+        <canvas id="c" width="820" height="820"></canvas>
+        <div id="areaInfo" class="areaInfo">—</div>
+        <div class="hint">Cornucopia is Area 1 • Select an area to inspect • Move only after committing an action</div>
+      </main>
+      <!-- RIGHT: gameplay (actions + entities in your current area) -->
+      <aside class="panel" id="leftPanel">
+        <div class="panelHeader">
+          <div class="h1" style="margin:0;">${(world && world.map && world.map.arenaName) ? world.map.arenaName : "Survival Arena"}</div>
+          <div class="muted small">Day <span id="day"></span> • Area <span id="curArea"></span></div>
+        </div>
+
+        <div id="leftAlert" class="alert hidden">—</div>
+
+        <div id="needsAction" class="section">
+          <div class="banner">
+            You must perform an action in this area before moving to the next one.
+          </div>
+
+          <div class="muted" style="margin-top:12px;">Players in the area</div>
+          <div id="areaPills" class="pillWrap" style="margin-top:8px;"></div>
+
+          <div id="groundItemWrap" class="hidden" style="margin-top:12px;">
+            <div class="muted">Items on the ground</div>
+            <div id="groundItemPills" class="pillWrap" style="margin-top:8px;"></div>
+          </div>
+
+          <div class="row" style="margin-top:12px; gap:8px; flex-wrap:wrap;">
+            <button id="btnDefend" class="btn blue" style="flex:1; min-width:120px;">Defend</button>
+            <button id="btnNothing" class="btn ghost" style="flex:1; min-width:120px;">Nothing</button>
+            <button id="btnDrink" class="btn teal hidden" style="flex:1; min-width:120px;" data-tooltip="Restore 5 FP by drinking water">Drink water</button>
+            <button id="btnSetNet" class="btn purple hidden" style="flex:1; min-width:120px;" data-tooltip="Set a Net trap here (activates tomorrow)">Set Net</button>
+            <button id="btnSetMine" class="btn orange hidden" style="flex:1; min-width:120px;" data-tooltip="Set a Mine trap here (activates tomorrow)">Set Mine</button>
+            <button id="btnAttack" class="btn red hidden" style="flex:1; min-width:120px;">Attack</button>
+            <button id="btnCollect" class="btn hidden" style="flex:1; min-width:120px;" data-tooltip="Pick up the selected item">Collect item</button>
+          </div>
+
+          <div class="muted small" style="margin-top:8px;">Moves left today: <span id="movesLeft"></span></div>
+        </div>
+
+        <div id="exploreState" class="section hidden">
+          <div class="banner">
+            You survived another day. You may move and then end the day.
+          </div>
+          <div class="row" style="margin-top:12px;">
+            <button id="btnEndDay" class="btn green" style="width:100%; padding:12px 14px;">End Day</button>
+          </div>
+          <div class="muted small" style="margin-top:8px;">Moves left today: <span id="movesLeft2"></span></div>
+        </div>
+
+        <div id="trappedState" class="section hidden">
+          <div class="banner danger">
+            You are trapped in a Net. You cannot act or move for <span id="trapDays"></span> day(s).
+          </div>
+          <div class="muted" style="margin-top:10px;">You can only escape by cutting the net with a Dagger.</div>
+          <div class="row" style="margin-top:12px; gap:8px; flex-wrap:wrap;">
+            <button id="btnCutNet" class="btn red hidden" style="flex:1; min-width:160px;" data-tooltip="Consume 1 Dagger to escape">Cut net (Dagger)</button>
+            <button id="btnEndDayTrapped" class="btn green" style="flex:1; min-width:160px;">End Day</button>
+          </div>
+        </div>
+      </aside>
+
+      </div>
 
   `;
 
