@@ -449,6 +449,16 @@ textarea{
 
 .itemPill:hover{ border-color: rgba(250,208,44,0.45); }
 
+.itemPill.emptySlot{
+  cursor: default;
+  opacity: 0.55;
+  border-style: dashed;
+  border-color: rgba(250,208,44,0.16);
+  background: rgba(17,17,19,0.35);
+}
+
+.itemPill.emptySlot:hover{ border-color: rgba(250,208,44,0.16); }
+
 .itemPill.equipped{ outline: 2px solid rgba(250,208,44,0.55); }
 .itemPill.defEquipped{ outline: 2px solid rgba(66,133,244,0.55); }
 .itemPill.ground.selected{ outline: 2px solid rgba(250,208,44,0.55); }

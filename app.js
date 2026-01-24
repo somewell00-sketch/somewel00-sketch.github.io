@@ -945,25 +945,35 @@ function renderGame(){
     renderSlot(attackSlotEl, weaponEq, "No attack item equipped");
     renderSlot(defenseSlotEl, defEq, "No defense item equipped");
 
-    invPillsEl.innerHTML = items.length ? items.map((it, idx) => {
+    // Render fixed inventory slots (video-game style): always show INVENTORY_LIMIT pills.
+    // Filled pills map 1:1 to items[] indices; remaining slots are empty placeholders.
+    const slots = Array.from({ length: INVENTORY_LIMIT }, (_, slotIdx) => {
+      const it = items[slotIdx];
+      if(!it){
+        return `<button class="itemPill emptySlot" disabled aria-disabled="true" data-tooltip="Empty slot">
+          <span class="pillIcon" aria-hidden="true">＋</span>
+          <span class="pillName">Empty</span>
+        </button>`;
+      }
+
       const def = getItemDef(it.defId);
       const name = def ? def.name : it.defId;
       const qty = it.qty || 1;
       const dmg = def?.type === ItemTypes.WEAPON ? displayDamageLabel(def.id, qty) : "";
       const eq = (weaponEq && it.defId === weaponEq) ? "equipped" : "";
       const de = (defEq && it.defId === defEq) ? "defEquipped" : "";
-      const uses = (it.usesLeft != null) ? ` • ${escapeHtml(String(it.usesLeft))} uses` : "";
-      const tip = def ? def.description : "";
       const badge = def?.type === ItemTypes.WEAPON ? `<span class="pillBadge">${escapeHtml(dmg || "")}</span>` : "";
       const stack = qty > 1 ? ` x${escapeHtml(String(qty))}` : "";
       const tooltip = buildItemTooltip(def, it, qty);
-      return `<button class="itemPill ${eq} ${de}" data-idx="${idx}" data-tooltip="${escapeHtml(tooltip)}">
+      return `<button class="itemPill ${eq} ${de}" data-idx="${slotIdx}" data-tooltip="${escapeHtml(tooltip)}">
         <span class="pillIcon" aria-hidden="true">${escapeHtml(getItemIcon(it.defId))}</span>
         <span class="pillName">${escapeHtml(name)}${stack}</span>
         ${badge}
-        <span class="pillRemove" data-remove-idx="${idx}" title="Discard">×</span>
+        <span class="pillRemove" data-remove-idx="${slotIdx}" title="Discard">×</span>
       </button>`;
-    }).join("") : `<div class="muted small">Empty</div>`;
+    });
+
+    invPillsEl.innerHTML = slots.join("");
 
     // interactions
     // Remove buttons
@@ -987,7 +997,8 @@ function renderGame(){
       };
     });
 
-    invPillsEl.querySelectorAll(".itemPill").forEach(btn => {
+    // Only interactive pills (ignore empty placeholders)
+    invPillsEl.querySelectorAll(".itemPill:not(.emptySlot)").forEach(btn => {
       btn.onclick = () => {
         const idx = Number(btn.getAttribute("data-idx"));
         const it = items[idx];
