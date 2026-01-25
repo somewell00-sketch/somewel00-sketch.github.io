@@ -72,6 +72,11 @@ a{ color: var(--accent); }
   border: 1px solid rgba(250,208,44,0.18);
   box-shadow: var(--shadow);
 
+  /* Keep the canvas centered even when the grid column is larger */
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
   /* Biome backgrounds: overlay gradient + procedural texture */
   background-position: center, center;
   background-size: cover, cover;
@@ -81,6 +86,10 @@ a{ color: var(--accent); }
 /* Prevent touch scrolling while dragging the map on mobile */
 .canvasWrap canvas{
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  display:block;
 }
 
 .minimap{

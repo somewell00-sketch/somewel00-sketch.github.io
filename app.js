@@ -8,6 +8,13 @@ import { saveToLocal, loadFromLocal, clearLocal, downloadJSON, uploadJSON } from
 
 const root = document.getElementById("root");
 
+// Mobile Safari can "helpfully" zoom/pan the page on double-tap / pinch gestures,
+// which feels like the map camera jumping around. We block those gestures so the
+// canvas stays visually stable.
+document.addEventListener("gesturestart", (e) => { e.preventDefault(); }, { passive: false });
+document.addEventListener("gesturechange", (e) => { e.preventDefault(); }, { passive: false });
+document.addEventListener("gestureend", (e) => { e.preventDefault(); }, { passive: false });
+
 // --- Global tooltip system (works on start screen and in-game) ---
 const getUiTooltipEl = () => document.getElementById("uiTooltip");
 let __tooltipsInit = false;
@@ -854,6 +861,8 @@ function renderGame(){
   }
 
   const canvas = document.getElementById("c");
+  // Avoid browser zooming on double-tap over the canvas.
+  canvas.addEventListener("dblclick", (e) => e.preventDefault());
   const mapUI = new MapUI({
     canvas,
     getCurrentAreaId: () => world?.entities?.player?.areaId ?? 1,

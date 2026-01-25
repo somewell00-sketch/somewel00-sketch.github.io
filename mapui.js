@@ -242,6 +242,11 @@ export class MapUI {
     this._pan = { x: 0, y: 0 };
     this._drag = { active: false, moved: false, startX: 0, startY: 0, lastX: 0, lastY: 0 };
 
+    // Track the area we're following so we can reset pan on movement.
+    // This prevents camera "jumps" near the arena edges (common on touch devices
+    // where tiny finger jitter can register as a drag).
+    this._lastFollowAreaId = null;
+
     this.hoveredId = null;
     // Last mouse position in canvas pixels (used to anchor tooltips).
     this._mouse = { cx: 0, cy: 0, has: false };
@@ -582,7 +587,13 @@ export class MapUI {
 
     const totalDx = e.clientX - this._drag.startX;
     const totalDy = e.clientY - this._drag.startY;
-    if(Math.hypot(totalDx, totalDy) > 4) this._drag.moved = true;
+
+    // Don't start panning until the pointer moved past a small threshold.
+    // This avoids unintended pans on simple clicks/taps.
+    if(!this._drag.moved){
+      if(Math.hypot(totalDx, totalDy) <= 6) return;
+      this._drag.moved = true;
+    }
 
     this._pan.x += dx;
     this._pan.y += dy;
@@ -937,6 +948,18 @@ export class MapUI {
 
   render(){
     if(!this.world || !this.geom) return;
+
+    // When we are following the player, moving to a different area should snap
+    // the camera back to center (clears any prior manual pan).
+    if(!!this.options.followPlayer){
+      const cur = this.getCurrentAreaId();
+      if(this._lastFollowAreaId !== cur){
+        this._lastFollowAreaId = cur;
+        this._pan.x = 0;
+        this._pan.y = 0;
+        if(this._drag){ this._drag.active = false; this._drag.moved = false; }
+      }
+    }
 
     // Compute the target view transform.
     this._viewTarget = this.computeView();
