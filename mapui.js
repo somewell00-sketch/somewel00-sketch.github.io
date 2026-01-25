@@ -89,6 +89,122 @@ function drawSafeLabel(ctx, poly, label, isEmoji){
   ctx.restore();
 }
 
+// --- Narrative tooltip text (5–7 words), with biome variations ---
+const NOISE_TEXT_BY_BIOME = {
+  default: {
+    silent: [
+      "Only wind and distant stillness",
+      "Nothing seems to have happened here",
+      "The area feels untouched and calm",
+    ],
+    quiet: [
+      "Faint traces of recent passage",
+      "Something passed through, long ago",
+      "The place feels mostly undisturbed",
+    ],
+    noisy: [
+      "Signs of recent movement everywhere",
+      "This place has drawn attention",
+      "Activity lingers in the air",
+    ],
+    high: [
+      "Voices and movement echo nearby",
+      "This area feels dangerously active",
+      "Someone is definitely close",
+    ],
+    unknown: [
+      "The territory remains unknown",
+      "No information about this place",
+      "What lies here is uncertain",
+    ]
+  },
+
+  // Biome-specific variants (still short, still ambiguous)
+  desert: {
+    silent: ["Heat shimmers, nothing else moves", "Dry air, absolute quiet", "Sand lies still and empty"],
+    quiet: ["Footprints fade beneath drifting sand", "Dry tracks, then sudden silence", "A hush settles over the dunes"],
+    noisy: ["Sand shifts with hurried movement", "Dust trails linger in sunlight", "Activity stirs across the dunes"],
+    high: ["Shouts carry across open sand", "Movement storms through the dunes", "Someone is running close by"],
+  },
+  glacier: {
+    silent: ["Ice creaks, then falls silent", "Frozen air, nothing stirs", "Stillness wrapped in brittle cold"],
+    quiet: ["Cracks suggest recent passage", "Cold tracks fade into frost", "Faint echoes under the ice"],
+    noisy: ["Ice chips scatter from quick steps", "Sharp echoes bounce off ice", "Movement rings through the glacier"],
+    high: ["Cracking ice, voices very near", "The glacier shakes with movement", "Someone is dangerously close now"],
+  },
+  tundra: {
+    silent: ["Snowfields lie flat and quiet", "Only wind over empty frost", "Cold stillness presses all around"],
+    quiet: ["Faint tracks cross the snow", "A passage, then bitter calm", "The tundra feels mostly undisturbed"],
+    noisy: ["Snow crunches with recent movement", "Activity disturbs the white silence", "Something stirs beyond the drift"],
+    high: ["Voices cut through frozen air", "Footfalls pound across hard snow", "Someone is definitely close"],
+  },
+  mountain: {
+    silent: ["Thin air and distant stillness", "Rocks watch in quiet calm", "Only wind along the ridges"],
+    quiet: ["Loose gravel hints at passage", "A path disturbed, then calm", "Echoes fade into the peaks"],
+    noisy: ["Echoes carry from recent movement", "Stones tumble, voices somewhere", "Activity clings to the cliffs"],
+    high: ["Shouts ricochet between the peaks", "Heavy steps shake loose stone", "Someone is very close"],
+  },
+  forest: {
+    silent: ["Leaves barely stir in silence", "Birds quiet, woods listening", "Still canopy, no recent signs"],
+    quiet: ["Twigs snapped, then calm returns", "A trail disturbed, now quiet", "Faint rustle, far away"],
+    noisy: ["Branches sway with recent movement", "Footsteps disturb the undergrowth", "Activity ripples through the trees"],
+    high: ["Voices thread between the trunks", "The forest trembles with movement", "Someone is definitely close"],
+  },
+  woods: {
+    silent: ["Woods feel calm and untouched", "Only wind in the branches", "Everything holds its breath"],
+    quiet: ["Faint tracks weave between trees", "A passage, then quiet returns", "The grove feels mostly undisturbed"],
+    noisy: ["Leaves scatter from hurried movement", "Recent activity stirs the grove", "This place has drawn attention"],
+    high: ["Voices echo through the woods", "Movement closes in fast", "Someone is definitely close"],
+  },
+  jungle: {
+    silent: ["Humidity hangs, surprisingly quiet", "Vines still, no fresh signs", "A heavy calm settles here"],
+    quiet: ["Faint disturbance in tangled vines", "Something passed, the jungle waits", "The canopy hides old tracks"],
+    noisy: ["Leaves whip from recent movement", "Life stirs, footsteps nearby", "Activity lingers in thick air"],
+    high: ["Crashing foliage, voices close", "The jungle roars with movement", "Someone is dangerously close"],
+  },
+  swamp: {
+    silent: ["Still water, no ripples", "Murk rests in quiet silence", "Only insects in the gloom"],
+    quiet: ["Mud prints sink into stillness", "Faint splashes, then silence", "The swamp feels mostly undisturbed"],
+    noisy: ["Water churns with recent movement", "Mud churned, something passed", "Activity lingers in the mire"],
+    high: ["Splashes and voices very near", "The mire thrashes with movement", "Someone is definitely close"],
+  },
+  lake: {
+    silent: ["Water lies flat and quiet", "Only distant ripples remain", "The shore feels calm"],
+    quiet: ["Faint tracks along the shore", "A passage, then still water", "The lake feels mostly undisturbed"],
+    noisy: ["Ripples spread from recent movement", "The shore shows fresh activity", "This place has drawn attention"],
+    high: ["Splashes echo nearby", "Voices carry across the water", "Someone is definitely close"],
+  },
+  industrial: {
+    silent: ["Machines rest, the metal quiet", "Empty halls, no recent noise", "Only distant hum remains"],
+    quiet: ["Scuffs suggest recent passage", "A faint clank, then calm", "The place feels mostly undisturbed"],
+    noisy: ["Footsteps ring through metal", "Echoes linger in empty halls", "This place has drawn attention"],
+    high: ["Loud echoes, movement very near", "Metal shakes with heavy steps", "Someone is dangerously close"],
+  },
+  fairy: {
+    silent: ["Air sparkles, eerily quiet", "Soft glow, no recent signs", "Stillness feels almost magical"],
+    quiet: ["Faint shimmer marks a passage", "Whispers fade into calm", "The grove feels mostly undisturbed"],
+    noisy: ["Glittering trails hint at movement", "The air stirs with activity", "This place has drawn attention"],
+    high: ["Whispers rush, movement very near", "Magic crackles in the air", "Someone is definitely close"],
+  },
+};
+
+function _hashStr(s){
+  const str = String(s || "");
+  let h = 2166136261;
+  for(let i=0;i<str.length;i++){
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function pickVariant(list, seed){
+  const arr = Array.isArray(list) ? list : [];
+  if(!arr.length) return "";
+  const idx = (seed >>> 0) % arr.length;
+  return arr[idx];
+}
+
 export class MapUI {
   constructor({ canvas, onAreaClick, getCurrentAreaId, canMove, options }){
     this.canvas = canvas;
@@ -214,23 +330,29 @@ export class MapUI {
   }
 
   // --- Tooltip helpers ---
-  _noiseNarrative(level){
-    switch(String(level || "").toLowerCase()){
-      case "highly_noisy":
-        return "The air is loud and tense. Something is hunting.";
-      case "noisy":
-        return "You hear movement nearby. This place won’t stay quiet.";
-      case "quiet":
-      default:
-        return "Only wind and stillness, for now.";
-    }
+  _normalizeNoise(level){
+    const v = String(level || "").toLowerCase();
+    if(v === "high" || v === "highly" || v === "highly_noisy" || v === "very_noisy") return "high";
+    if(v === "noisy") return "noisy";
+    if(v === "silent") return "silent";
+    if(v === "unknown") return "unknown";
+    return "quiet";
   }
 
-  _areaStatusNarrative(area, day){
+  _noisePhrase(areaId, biomeKey, level, day){
+    const norm = this._normalizeNoise(level);
+    const key = String(biomeKey || "").toLowerCase();
+    const pack = NOISE_TEXT_BY_BIOME[key] || NOISE_TEXT_BY_BIOME.default;
+    const list = (pack && pack[norm]) ? pack[norm] : (NOISE_TEXT_BY_BIOME.default[norm] || []);
+    const seed = (Number(areaId)||0) * 73856093 ^ (Number(day)||0) * 19349663 ^ _hashStr(key) ^ _hashStr(norm);
+    return pickVariant(list, seed);
+  }
+
+  _statusPhrase(area, day){
     if(!area) return null;
-    if(area.isActive === false) return "Sealed territory. Entry is impossible.";
-    if(Number(area.willCloseOnDay) === Number(day) + 1) return "Warning: the zone may seal by tomorrow.";
-    return "Open territory.";
+    if(area.isActive === false) return "Sealed. Entry is impossible.";
+    if(Number(area.willCloseOnDay) === Number(day) + 1) return "The zone may seal by tomorrow.";
+    return null;
   }
 
   _getTooltipLines(areaId){
@@ -238,30 +360,30 @@ export class MapUI {
     const visited = new Set(this.world?.flags?.visitedAreas || []).has(areaId);
     const day = Number(this.world?.meta?.day ?? 1);
 
-    // Unknown areas: keep it explicit and simple.
+    // Unknown areas: keep it short and explicit.
     if(!visited || !area){
+      const seed = (Number(areaId)||0) * 2654435761 ^ (Number(day)||0) * 97;
+      const unknown = pickVariant(NOISE_TEXT_BY_BIOME.default.unknown, seed);
       return [
         `Area ${areaId}`,
-        "Uncharted territory.",
-        "Biome: Unknown",
-        "Noise: Unknown",
-        "Other details are unclear."
+        "Biome unknown.",
+        unknown || "The territory remains unknown",
       ];
     }
 
     const biomeKey = String(area.biome || "");
     const biomeLabel = BIOME_PT[biomeKey] || biomeKey || "Unknown";
-    const noiseState = area.noiseState || "quiet";
+    const noiseState = area.noiseState || area.noise || area.noisy || "quiet";
 
     const lines = [];
     lines.push(`Area ${areaId}`);
     lines.push(`Biome: ${biomeLabel}`);
-    lines.push(this._noiseNarrative(noiseState));
+    lines.push(this._noisePhrase(areaId, biomeKey, noiseState, day));
 
-    const st = this._areaStatusNarrative(area, day);
+    const st = this._statusPhrase(area, day);
     if(st) lines.push(st);
 
-    if(area.hasWater) lines.push("Water is present here.");
+    if(area.hasWater) lines.push("You hear water nearby.");
 
     // Optional: add short flavor cues if present.
     const flavor = area?.flavorText || null;
