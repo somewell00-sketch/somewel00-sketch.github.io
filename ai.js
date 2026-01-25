@@ -12,10 +12,21 @@ export function generateNpcIntents(world){
   const seed = Number(world?.meta?.seed ?? 1);
   const playerDistrict = world?.entities?.player?.district ?? null;
 
-  // COLLECT_DIVERSITY: per-area reservation counts for ground indices.
-  // Because intents are generated in a deterministic order, this is a cheap way
-  // to push NPCs toward different picks (still allowing disputes sometimes).
-  const reservedCollectByArea = new Map(); // areaId -> Map(itemIndex -> count)
+  // --- Global AI phase (macro behavior) ---
+  // CHAOS_EARLY  : > 2/3 alive
+  // STRATEGIC    : (1/3, 2/3]
+  // CHAOS_LATE   : <= 1/3 alive
+  const alive = countAlivePlayers(world);
+  const total = Math.max(1, Number(world?.meta?.totalPlayers ?? (alive || 1)));
+  const ratio = alive / total;
+  const aiPhase = (ratio > (2/3)) ? "CHAOS_EARLY" : (ratio > (1/3) ? "STRATEGIC" : "CHAOS_LATE");
+  // Store on meta for debug/logging (safe, purely informational)
+  if(world?.meta) world.meta.aiPhase = aiPhase;
+  const phaseProfile = getPhaseProfile(aiPhase);
+
+  // Per-day anti-collision reservations for COLLECT in the same area.
+  // Keyed by areaId => { itemIndex: count }
+  const reservedCollectByArea = {};
 
   const npcs = Object.values(world?.entities?.npcs || {});
 
@@ -26,27 +37,86 @@ export function generateNpcIntents(world){
     npc.memory.visited = npc.memory.visited || [];
     npc.memory.lastAreas = npc.memory.lastAreas || [];
     npc.memory.traits = npc.memory.traits || makeTraits(seed, npc.id, npc.district);
+    // Per-day flags (reset each day)
+    npc.memory._plannedCornCollect = false;
+    npc.memory._wantsFlee = false;
 
     const traits = npc.memory.traits;
     const obs = buildObservedWorld(world, npc);
 
     // --- Posture/action intent ---
-    const actionIntent = decidePosture(world, npc, obs, traits, { seed, day, playerDistrict, reservedCollectByArea });
+    const actionIntent = decidePosture(world, npc, obs, traits, {
+      seed,
+      day,
+      playerDistrict,
+      aiPhase,
+      phaseProfile,
+      reservedCollectByArea
+    });
     if(actionIntent) intents.push(actionIntent);
+
+    // Reserve collected index to increase diversity.
     if(actionIntent?.type === "COLLECT"){
       const aId = String(npc.areaId);
-      const idx = Number(actionIntent?.payload?.itemIndex ?? 0);
-      if(!reservedCollectByArea.has(aId)) reservedCollectByArea.set(aId, new Map());
-      const m = reservedCollectByArea.get(aId);
-      m.set(idx, (m.get(idx) || 0) + 1);
+      const idx = Number(actionIntent?.payload?.itemIndex);
+      if(Number.isFinite(idx)){
+        reservedCollectByArea[aId] = reservedCollectByArea[aId] || {};
+        reservedCollectByArea[aId][idx] = (reservedCollectByArea[aId][idx] || 0) + 1;
+      }
+      // Mark for Cornucopia exit rule (leave after getting any item).
+      if(Number(obs?.area?.id) === 1) npc.memory._plannedCornCollect = true;
     }
 
     // --- Movement intent ---
-    const moveIntent = decideMove(world, npc, obs, traits, { seed, day });
+    const moveIntent = decideMove(world, npc, obs, traits, { seed, day, aiPhase, phaseProfile });
     if(moveIntent) intents.push(moveIntent);
   }
 
   return intents;
+}
+
+function countAlivePlayers(world){
+  let n = 0;
+  const p = world?.entities?.player;
+  if(p && Number(p.hp ?? 0) > 0) n++;
+  for(const npc of Object.values(world?.entities?.npcs || {})){
+    if(npc && Number(npc.hp ?? 0) > 0) n++;
+  }
+  return n;
+}
+
+function getPhaseProfile(aiPhase){
+  // These are multipliers applied to existing scoring so we don't break balance.
+  // CHAOS phases deliberately increase randomness and group escalation.
+  switch(String(aiPhase)){
+    case "CHAOS_EARLY":
+      return {
+        risk: 0.75,
+        aggression: 1.25,
+        group: 0.95,
+        killLeader: 0.55,
+        coward: 0.55,
+        randomness: 0.85
+      };
+    case "CHAOS_LATE":
+      return {
+        risk: 0.65,
+        aggression: 1.35,
+        group: 0.75,
+        killLeader: 0.85,
+        coward: 0.40,
+        randomness: 0.95
+      };
+    default: // STRATEGIC
+      return {
+        risk: 1.20,
+        aggression: 0.95,
+        group: 0.35,
+        killLeader: 0.75,
+        coward: 0.80,
+        randomness: 0.25
+      };
+  }
 }
 
 function buildObservedWorld(world, npc){
@@ -71,6 +141,9 @@ function buildObservedWorld(world, npc){
     : [];
 
   // Observed: current area always. Adjacent area info is only partial and treated as "unknown" unless visited.
+    const wantsFlee = !!npc?.memory?._wantsFlee;
+  const hpP = hpPercent(npc);
+  const offensive = hasDamageItem(npc.inventory);
   const visitedSet = new Set(Array.isArray(npc.memory?.visited) ? npc.memory.visited : []);
   const adjacent = adj.map(id => {
     const a = world.map.areasById[String(id)];
@@ -93,7 +166,24 @@ function buildObservedWorld(world, npc){
   return { area, hereActors, adjacent };
 }
 
-function decidePosture(world, npc, obs, traits, { seed, day, playerDistrict, reservedCollectByArea }){
+function hpPercent(entity){
+  const hp = Number(entity?.hp ?? 0);
+  const max = 100;
+  return max > 0 ? (hp / max) : 0;
+}
+
+function hasDamageItem(inv){
+  const items = inv?.items || [];
+  for(const it of items){
+    if(!it) continue;
+    const def = getItemDef(it.defId);
+    const dmg = Number(def?.damage ?? 0);
+    if(dmg > 0 && (def?.type === ItemTypes.WEAPON || def?.type === ItemTypes.TRAP)) return true;
+  }
+  return false;
+}
+
+function decidePosture(world, npc, obs, traits, { seed, day, playerDistrict, aiPhase, phaseProfile, reservedCollectByArea }){
   if((npc.trappedDays ?? 0) > 0) return { source: npc.id, type: "NOTHING", payload: { reason: "trapped" } };
 
   const area = obs.area;
@@ -101,28 +191,93 @@ function decidePosture(world, npc, obs, traits, { seed, day, playerDistrict, res
   const hasWater = !!area?.hasWater;
   const ground = Array.isArray(area?.groundItems) ? area.groundItems : [];
 
-  // Used to discourage identical item picks in the same day.
-  const reservedHere = reservedCollectByArea?.get(String(npc.areaId)) || null;
-
-  // FORCE_COLLECT_CORN: Cornucopia scramble.
-  // Cornucopia starts with lots of finite loot. If an NPC still has space,
-  // it should keep trying to collect there (especially early), otherwise
-  // the ground ends up cluttered with untouched items.
+  // --- Cornucopia-specific NPC behavior (Area 1 only) ---
+  // Memory (temporary):
+  // - cornCollectTries: number of COLLECT attempts made in the Cornucopia.
+  // - cornHasWeapon: true if the NPC has collected any weapon.
+  // Outside Area 1, the AI works as usual.
   const inCorn = Number(area?.id) === 1;
-  if(inCorn && ground.length && invN < INVENTORY_LIMIT){
-    // Cornucopia scramble: make early collection near-certain so loot doesn't sit forever.
-    // This also restores the old "try to pick items in the first two days" behavior.
-    let baseChance = 0.55;
-    if(day <= 2) baseChance = 0.98;
-    else if(day === 3) baseChance = 0.92;
-    // If they have 0–1 items, they are still gearing up.
-    const invBoost = (invN <= 1) ? 0.25 : 0;
-    const rForce = hash01(seed, day, `corn_collect|${npc.id}|${invN}|${ground.length}`);
-    // For day 1–2, if they have space, we force the attempt (no RNG gate).
-    if(day <= 2 || rForce < Math.min(0.98, baseChance + invBoost)){
-      const idx = chooseGroundItemIndex(world, npc, ground, traits, { seed, day, reservedHere, inCorn:true });
-      return { source: npc.id, type: "COLLECT", payload: { itemIndex: idx } };
+  const areaIdStr = String(area?.id ?? npc.areaId ?? "");
+  const reservedHere = reservedCollectByArea?.[areaIdStr] || {};
+  if(inCorn){
+    npc.memory = npc.memory || {};
+    if(npc.memory.cornCollectTries == null) npc.memory.cornCollectTries = 0;
+    if(npc.memory.cornHasWeapon == null) npc.memory.cornHasWeapon = false;
+
+    // If they already have a weapon, treat this as "has weapon" for the exit rule.
+    if(!npc.memory.cornHasWeapon){
+      const w = strongestWeaponInInventory(npc.inventory);
+      if(w) npc.memory.cornHasWeapon = true;
     }
+
+    const invFull = invN >= INVENTORY_LIMIT;
+    const noItemsLeft = ground.length === 0;
+    const triedTwiceNoWeapon = (npc.memory.cornCollectTries >= 2) && !npc.memory.cornHasWeapon;
+    // Rule: Cornucopia is a scramble. If you successfully get *any* item, you leave.
+    // If you fail twice to secure a weapon, you may also give up and leave.
+    const hasAnyItem = invN >= 1;
+    const canLeaveCorn = hasAnyItem || triedTwiceNoWeapon || noItemsLeft || invFull;
+
+    // If not allowed to leave yet, the NPC must keep trying to COLLECT (no swapping in cornucopia).
+    if(!canLeaveCorn){
+      if(!invFull && ground.length){
+        // Cornucopia needs to "spread" NPCs across items; otherwise many will contest the same
+        // top-valued pickup and leave empty-handed after 2 tries.
+        // We do a weighted pick across ALL ground items (deterministic per NPC/day) so
+        // early-game loot gets distributed quickly and more believably.
+
+        const opts = [];
+        for(let i=0;i<ground.length;i++){
+          const inst = ground[i];
+          const def = getItemDef(inst?.defId);
+          let v0 = itemValue(def, inst);
+          let v = v0;
+
+          // Anti-collision: if many NPCs are already planning to pick this index today, devalue it.
+          const reservedCount = Number(reservedHere?.[i] ?? 0);
+          if(reservedCount > 0) v *= 1 / (1 + reservedCount * 1.35);
+
+          // Personality-driven preferences in the Cornucopia:
+          // - greed => chase stronger weapons more
+          // - caution => avoid the single best item (likely contested), accept median value
+          // - packrat => value backpacks/utility more
+          const isWeapon = def?.type === ItemTypes.WEAPON;
+          const isBackpack = (def?.id === "backpack" || def?.id === "first_aid_backpack");
+
+          if(isWeapon){
+            // Exponent > 1 makes values more 'peaky' (harder preference for top weapons).
+            // Exponent < 1 flattens the field (more willing to take medium weapons).
+            const exp = 0.85 + (1 - traits.caution) * 0.75 - traits.caution * 0.10;
+            v = Math.pow(Math.max(0.001, v0), exp);
+            v *= (1.25 + traits.greed * 0.95);
+          } else {
+            v *= 0.95 + traits.packrat * 0.20;
+          }
+
+          if(isBackpack){
+            // Some NPCs will prioritize backpacks over raw weapon power.
+            v *= 1.10 + traits.packrat * 2.20 + traits.caution * 0.25;
+          }
+
+          // If the NPC still has no weapon, slightly deprioritize non-weapons.
+          if(!npc.memory.cornHasWeapon && !isWeapon) v *= 0.80;
+          // If they have no weapon and are bold, bump weapons a bit.
+          if(!npc.memory.cornHasWeapon && isWeapon) v *= 1.10 + (1 - traits.caution) * 0.20;
+
+          // Add a tiny NPC-specific jitter so ties don't collapse to the same index.
+          v += hash01(seed, day, `corn_item_jitter|${npc.id}|${i}`) * 0.02;
+
+          opts.push({ idx: i, score: v });
+        }
+
+        // Personality affects how sharply they chase top loot.
+        // Cautious NPCs spread out more (avoid heavy contests), bold NPCs focus the best.
+        const cornTemp = 0.22 + traits.caution * 0.55 - traits.greed * 0.10;
+        const pick = weightedPick(opts, hash01(seed, day, `corn_pick|${npc.id}`), cornTemp) || opts[0];
+        return { source: npc.id, type: "COLLECT", payload: { itemIndex: pick.idx } };
+      }
+    }
+    // If they can leave, fall through to normal logic (attack/defend/drink/etc.).
   }
 
   // Hunger/FP: if low and water exists, prefer drinking.
@@ -130,49 +285,97 @@ function decidePosture(world, npc, obs, traits, { seed, day, playerDistrict, res
     return { source: npc.id, type: "DRINK", payload: {} };
   }
 
+  // Very low FP: cannot attack (only DEFEND / DRINK / NOTHING / COLLECT).
+  if((npc.fp ?? 0) < 10){
+    if(hasWater && (npc.fp ?? 0) <= 25) return { source: npc.id, type: "DRINK", payload: {} };
+    return { source: npc.id, type: "DEFEND", payload: {} };
+  }
+
   
   // Low FP: prioritize food. If there is an FP-restoring consumable on the ground, try to collect it.
   if((npc.fp ?? 0) <= 20 && ground.length && invN < INVENTORY_LIMIT){
-    // Prefer FP restore, but keep it diverse (avoid all NPCs dogpiling the same exact index).
-    let bestGain = 0;
-    const gains = [];
+    let bestIdx = -1;
+    let bestGain = -1;
     for(let i=0;i<ground.length;i++){
       const inst = ground[i];
       const def = getItemDef(inst?.defId);
       const gain = Number(def?.effects?.healFP ?? 0);
-      if(gain > 0){
-        bestGain = Math.max(bestGain, gain);
-        gains.push({ idx: i, gain });
+      if(gain > bestGain){
+        bestGain = gain;
+        bestIdx = i;
       }
     }
-    if(bestGain > 0 && gains.length){
-      const pool = gains
-        .filter(x => x.gain >= bestGain * 0.8)
-        .map(x => {
-          const resCount = reservedHere ? (reservedHere.get(x.idx) || 0) : 0;
-          const penalty = Math.min(0.60, resCount * 0.35);
-          const jitter = (hash01(seed, day, `fp_pick|${npc.id}|${x.idx}`) - 0.5) * 0.20;
-          return { idx: x.idx, w: Math.max(0.001, (x.gain / 20) + 0.35 - penalty + jitter) };
-        });
-      const r = hash01(seed, day, `fp_pick_roll|${npc.id}|${npc.areaId}`);
-      const picked = weightedPick(pool, r, 0.8);
-      return { source: npc.id, type: "COLLECT", payload: { itemIndex: Number(picked?.idx ?? pool[0]?.idx ?? 0) } };
+    if(bestGain > 0 && bestIdx >= 0){
+      return { source: npc.id, type: "COLLECT", payload: { itemIndex: bestIdx } };
     }
   }
 
-// Collect: greed-based; pick the highest-value visible ground item.
+  // Collect: greed-based, but with diversity.
+  // Instead of always grabbing the single best item (which causes collisions),
+  // pick from a larger pool with weighted randomness and an anti-collision penalty.
   if(ground.length && invN < INVENTORY_LIMIT){
     const r = hash01(seed, day, `npc_collect_bias|${npc.id}`);
-    if(r < (0.10 + traits.greed * 0.35)){
-      const idx = chooseGroundItemIndex(world, npc, ground, traits, { seed, day, reservedHere, inCorn });
-      return { source: npc.id, type: "COLLECT", payload: { itemIndex: idx } };
+    const baseChance = 0.10 + traits.greed * 0.35;
+    if(r < Math.min(0.85, baseChance + (phaseProfile?.randomness ?? 0) * 0.10)){
+      const scored = [];
+      for(let i=0;i<ground.length;i++){
+        const inst = ground[i];
+        const def = getItemDef(inst?.defId);
+        let v = itemValue(def, inst);
+        // Anti-collision
+        const reservedCount = Number(reservedHere?.[i] ?? 0);
+        if(reservedCount > 0) v *= 1 / (1 + reservedCount * 1.25);
+        // Tiny deterministic jitter so ties don't collapse
+        v += hash01(seed, day, `collect_jitter|${npc.id}|${i}`) * 0.015;
+        scored.push({ idx: i, score: v });
+      }
+      scored.sort((a,b)=>b.score-a.score);
+      const topN = Math.min(10, scored.length);
+      const pool = scored.slice(0, topN);
+      const temp = 0.20 + (phaseProfile?.randomness ?? 0) * 0.55 + traits.caution * 0.15;
+      const pick = weightedPick(pool, hash01(seed, day, `collect_pick|${npc.id}|${areaIdStr}`), temp) || pool[0];
+      return { source: npc.id, type: "COLLECT", payload: { itemIndex: pick.idx } };
     }
+  }
+
+
+  // Injured NPCs avoid combat (System 3)
+  if(hpPercent(npc) < 0.30){
+    npc.memory = npc.memory || {};
+    npc.memory._wantsFlee = true;
+    return { source: npc.id, type: "DEFEND", payload: {} };
   }
 
   // Attack/Defend/Nothing: evaluate targets in the same area.
   const targets = obs.hereActors
     .map(x => x.entity)
     .filter(t => t && (t.hp ?? 0) > 0 && t.areaId === npc.areaId);
+
+  // Context for social pressure / dogpiles
+  const allActors = [npc, ...targets];
+  const actorsInArea = allActors.length;
+
+  // Find current "kill leader" among alive entities (for threat targeting)
+  let maxKills = 0;
+  {
+    const p = world?.entities?.player;
+    if(p && Number(p.hp ?? 0) > 0) maxKills = Math.max(maxKills, Number(p.kills ?? 0));
+    for(const o of Object.values(world?.entities?.npcs || {})){
+      if(!o || Number(o.hp ?? 0) <= 0) continue;
+      maxKills = Math.max(maxKills, Number(o.kills ?? 0));
+    }
+  }
+  const killLeaderDenom = Math.max(1, maxKills);
+
+  // Identify the strongest actor in this area (used for coalition pressure)
+  let strongestId = npc.id;
+  let strongestScore = -1e9;
+  for(const a of allActors){
+    const w = strongestWeaponInInventory(a?.inventory);
+    const wDmg = Number(w?.dmg ?? w?.damage ?? 0);
+    const s = Number(a?.hp ?? 0) * 0.55 + wDmg * 1.35 + Number(a?.kills ?? 0) * 1.25;
+    if(s > strongestScore){ strongestScore = s; strongestId = a?.id; }
+  }
 
   
   // If the NPC has a strong weapon (>= 30 damage), prioritize attacking someone in the same area.
@@ -191,12 +394,83 @@ let bestAttack = null;
     const killChance = estimateKillChance(world, npc, t, { seed, day });
     const risk = estimateRisk(world, npc, t);
 
-    let score = killChance * (0.9 + traits.aggression) - risk * (0.6 + traits.caution);
-    if(hasStrongWeapon) score += 0.55;
+    const prof = phaseProfile || { risk: 1, aggression: 1, group: 0, killLeader: 0, coward: 0, randomness: 0 };
+    // Core expected value, with phase multipliers
+    let score = (killChance * (0.9 + traits.aggression) * prof.aggression) - (risk * (0.6 + traits.caution) * prof.risk);
+
+    // Presence pressure: if someone is here, the situation tends to escalate.
+    // This increases same-area fights without making low-HP NPCs suicidal.
+    score += (hpPercent(npc) >= 0.70) ? 0.28 : 0.16;
+    if(hasDamageItem(npc.inventory)) score += 0.10;
+
+    // Aggressiveness by HP (System 3)
+    const hpP = hpPercent(npc);
+    if(hpP >= 0.70) score += 0.20;
+    if(hpP < 0.30) score -= 0.65;
+
+    if(hasStrongWeapon) score += 0.55 * prof.aggression;
     if(sameDistrict) score -= 0.55;
     if(playerDistrictBias) score -= 0.20;
+
+    // --- Kill-leader pressure ---
+    // More kills => higher perceived threat => more likely to be targeted.
+    const tKills = Number(t?.kills ?? 0);
+    const killFrac = tKills / killLeaderDenom;
+    score += killFrac * (0.65 * prof.killLeader);
+
+    // --- Coward opportunism (finishing weak targets) ---
+    const tHpP = hpPercent(t);
+    const tWeapon = strongestWeaponInInventory(t?.inventory);
+    const tWeaponDmg = Number(tWeapon?.dmg ?? tWeapon?.damage ?? 0);
+    const targetLooksWeak = (tHpP < 0.25) || (tWeaponDmg <= 0) || (Number(t?.fp ?? 100) < 12);
+    if(targetLooksWeak) score += (0.55 + (1 - traits.caution) * 0.20) * prof.coward;
+
+    // --- District dynamics: high districts (1-4) have a soft alliance ---
+    const npcD = Number(npc?.district ?? 12);
+    const tD = Number(t?.district ?? 12);
+    const npcHigh = npcD <= 4;
+    const tHigh = tD <= 4;
+    if(npcHigh){
+      if(tHigh){
+        // Penalty to attack high-district peers, but allow betrayal when advantageous.
+        let pen = 0.25;
+        const betrayal = (String(aiPhase) === "STRATEGIC") && ((Number(t?.hp ?? 100) <= 45) || (killFrac >= 0.55));
+        if(betrayal) pen *= 0.30;
+        score -= pen;
+      } else {
+        score += 0.20;
+      }
+    } else {
+      // Low districts are slightly wary of high districts, unless they have numbers.
+      if(tHigh && !(actorsInArea >= 3 && t.id === strongestId)) score -= 0.10;
+    }
+
+    // --- Coalition pressure (3+ in the same area) ---
+    // Weak/medium actors coordinate implicitly to bring down the strongest.
+    if(actorsInArea >= 3 && t.id === strongestId && npc.id !== strongestId){
+      const myHpP = hpPercent(npc);
+      const iAmWeaker = myHpP < 0.75 || !hasDamageItem(npc.inventory);
+      if(iAmWeaker){
+        const groupBonus = (actorsInArea - 2) * (0.35 * prof.group);
+        score += groupBonus;
+      }
+    }
+
+    // --- Phase-driven randomness (keeps it less predictable in CHAOS phases) ---
+    if(prof.randomness > 0){
+      score += (hash01(seed, day, `attack_noise|${npc.id}|${t.id}`) - 0.5) * (0.45 * prof.randomness);
+    }
+    // Player interaction (System 3)
+    if(t.id === "player"){
+      const playerW = strongestWeaponInInventory(world?.entities?.player?.inventory);
+      const playerDmg = Number(playerW?.dmg ?? 0);
+      if(hpPercent(npc) >= 0.70) score += 0.15;
+      if(hpPercent(npc) < 0.30 && playerDmg >= 30) score -= 0.55;
+    }
     // Prefer weaker-looking targets.
-    score += clamp01((100 - (t.hp ?? 100)) / 100) * 0.35;
+    // Prefer weaker-looking targets (more if we're healthy).
+    const weakFactor = clamp01((100 - (t.hp ?? 100)) / 100);
+    score += weakFactor * (hpPercent(npc) >= 0.70 ? 0.55 : 0.35);
 
     if(score > bestAttackScore){
       bestAttackScore = score;
@@ -204,7 +478,18 @@ let bestAttack = null;
     }
   }
 
-  const defendScore = 0.35 + traits.caution * 0.45 + fearFactor(npc) * 0.6;
+  const prof = phaseProfile || { risk: 1, aggression: 1, group: 0, killLeader: 0, coward: 0, randomness: 0 };
+  let defendScore = 0.35 + traits.caution * 0.45 + fearFactor(npc) * 0.6;
+  // Phase adjustments: strategic play defends more, chaos defends less.
+  if(String(aiPhase) === "STRATEGIC") defendScore += 0.08 + traits.caution * 0.06;
+  else defendScore -= 0.08 - (1 - traits.caution) * 0.04;
+  // If there is a live target right here, defending becomes less attractive compared to acting.
+  // Healthy NPCs are more willing to take initiative.
+  if(targets.length){
+    const hpP = hpPercent(npc);
+    if(hpP >= 0.70) defendScore -= 0.14;
+    else defendScore -= 0.06;
+  }
   const nothingScore = 0.15;
 
   // If they have no visible targets, bias to defend.
@@ -223,7 +508,7 @@ let bestAttack = null;
     : { source: npc.id, type: "NOTHING", payload: {} };
 }
 
-function decideMove(world, npc, obs, traits, { seed, day }){
+function decideMove(world, npc, obs, traits, { seed, day, aiPhase, phaseProfile }){
   if((npc.trappedDays ?? 0) > 0) return { source: npc.id, type: "STAY", payload: { reason: "trapped" } };
 
   const max = maxStepsForNpc(npc);
@@ -233,7 +518,33 @@ function decideMove(world, npc, obs, traits, { seed, day }){
   const lowFp = (npc.fp ?? 0) <= 20;
   const currentArea = world.map?.areasById?.[String(npc.areaId)];
   const inCornucopia = Number(currentArea?.id) === 1;
-const visitedSet = new Set(Array.isArray(npc.memory?.visited) ? npc.memory.visited : []);
+  const invCountNow = inventoryCount(npc.inventory);
+  const wantsFlee = !!npc?.memory?._wantsFlee;
+
+  const visitedSet = new Set(Array.isArray(npc.memory?.visited) ? npc.memory.visited : []);
+
+  // Cornucopia exit rule:
+  // - If the NPC already has at least 1 item OR is planning to collect today, they leave.
+  // - If they fail to secure a weapon after 2 tries, they may also give up and leave.
+  // - If there are no items left or inventory is full, they can leave.
+  let forceLeaveCorn = false;
+  if(inCornucopia){
+    npc.memory = npc.memory || {};
+    if(npc.memory.cornCollectTries == null) npc.memory.cornCollectTries = 0;
+    if(npc.memory.cornHasWeapon == null) npc.memory.cornHasWeapon = false;
+    if(!npc.memory.cornHasWeapon){
+      const w = strongestWeaponInInventory(npc.inventory);
+      if(w) npc.memory.cornHasWeapon = true;
+    }
+    const hereGround = Array.isArray(currentArea?.groundItems) ? currentArea.groundItems : [];
+    const invFull = invCountNow >= INVENTORY_LIMIT;
+    const noItemsLeft = hereGround.length === 0;
+    const triedTwiceNoWeapon = (npc.memory.cornCollectTries >= 2) && !npc.memory.cornHasWeapon;
+    const gotAnyOrWillGet = (invCountNow >= 1) || !!npc?.memory?._plannedCornCollect;
+    const canLeaveCorn = gotAnyOrWillGet || triedTwiceNoWeapon || noItemsLeft || invFull;
+    if(!canLeaveCorn) return { source: npc.id, type: "STAY", payload: { reason: "corn_locked" } };
+    forceLeaveCorn = true;
+  }
 
   // BFS up to 3 steps, but we score only known areas well. Unknown areas get conservative estimates.
   const start = Number(npc.areaId);
@@ -252,6 +563,8 @@ const visitedSet = new Set(Array.isArray(npc.memory?.visited) ? npc.memory.visit
       seen.add(nid);
       const a = world.map?.areasById?.[String(nid)];
       if(!a || a.isActive === false) continue;
+      // Movement constraints: skip impassable water areas.
+      if(a.hasWater && !a.hasBridge) continue;
       // Avoid areas that will vanish tomorrow.
       const willCloseTomorrow = (a.willCloseOnDay != null) && (Number(a.willCloseOnDay) === day + 1);
       if(willCloseTomorrow) continue;
@@ -271,73 +584,37 @@ const visitedSet = new Set(Array.isArray(npc.memory?.visited) ? npc.memory.visit
   const bestScore = scored[0]?.score ?? stayScore;
 
 
-// Dispersal rule (Cornucopia + general):
-// 0 items -> tends to stay and fight for loot
-// 1 item  -> starts considering leaving
-// 2+ items -> strongly prefers leaving
-const invCount = inventoryCount(npc.inventory);
+// Movement bias:
+// - If the current area has no loot, strongly encourage moving.
+// - Outside of that, don't move unless a destination is noticeably better.
+const invCount = invCountNow;
 let stayBias = 0;
-if(Number(start) === 1){
-  if(invCount === 0) stayBias = +0.22;
-  else if(invCount === 1) stayBias = -0.28;
-  else stayBias = -0.55;
-} else {
-  if(invCount >= 2) stayBias = -0.12;
-}
+if(invCount >= 2) stayBias = -0.12;
 const adjustedStayScore = stayScore + stayBias;
 
-  // Early Cornucopia: don't leave before trying to gear up.
-  // If day 1–2 and there is loot available, stay unless inventory is already decent.
-  const herePre = world.map?.areasById?.[String(start)];
-  const herePreGround = Array.isArray(herePre?.groundItems) ? herePre.groundItems : [];
-  if(Number(start) === 1 && day <= 2 && herePreGround.length > 0 && invCount < 2){
-    return { source: npc.id, type: "STAY", payload: { reason: "corn_gearing" } };
-  }
+const here = world.map?.areasById?.[String(start)];
+const hereGround = Array.isArray(here?.groundItems) ? here.groundItems : [];
+const emptyHere = hereGround.length === 0;
 
+// Force movement in a few cases:
+// - area is empty (no reason to camp)
+// - NPC is fleeing
+// - Cornucopia-specific gate says they must leave immediately once allowed
+const forceMove = emptyHere || wantsFlee || forceLeaveCorn;
 
-  // Inertia: don't move unless it is noticeably better.
-  // NOTE: We also add an explicit "leave empty areas" rule so NPCs don't freeze when there's
-  // no loot to fight for.
-  const here = world.map?.areasById?.[String(start)];
-  const hereGround = Array.isArray(here?.groundItems) ? here.groundItems : [];
-  const emptyHere = hereGround.length === 0;
-
-  // Early-game Cornucopia: keep NPCs from wandering off before they have a chance to gear up.
-  // This relies on the posture logic forcing collect attempts day 1–2.
-  if(Number(start) === 1 && day <= 2 && invCount < 2 && hereGround.length > 0){
-    return { source: npc.id, type: "STAY", payload: { reason: "corn_scramble" } };
-  }
-
-  // If the current area is empty, strongly encourage moving.
-  // Cornucopia: don't force early dispersal too fast or most loot will never be contested.
-  // Start forcing dispersal only after getting at least 2 items, and only when the pile is small.
-  const cornLootLow = (Number(start) === 1) && (hereGround.length <= 6);
-  // Post day-2 Cornucopia dispersal: once they've grabbed at least something, start pushing them outward
-  // even if there is still loot left, so the match doesn't stagnate.
-  let crowdHere = 0;
-  const p = world?.entities?.player;
-  if(p && (p.hp ?? 0) > 0 && Number(p.areaId) === Number(start) && !(p._today?.invisible)) crowdHere++;
-  for(const other of Object.values(world?.entities?.npcs || {})){
-    if(!other || (other.hp ?? 0) <= 0) continue;
-    if(Number(other.areaId) !== Number(start)) continue;
-    if(other._today?.invisible) continue;
-    crowdHere++;
-  }
-
-  const cornShouldDisperse = (Number(start) === 1 && day > 2 && invCount >= 1 && (hereGround.length <= 10 || crowdHere >= 5));
-  const forceMove = emptyHere || (Number(start) === 1 && invCount >= 2 && cornLootLow) || cornShouldDisperse;
-
-  let moveThreshold = (0.14 + traits.caution * 0.10) + (invCount === 0 && Number(start) === 1 ? 0.06 : 0) - (invCount >= 2 ? 0.06 : 0);
-  // After day 2 in the Cornucopia, lower the bar to move so they actually spread through the map.
-  if(Number(start) === 1 && day > 2) moveThreshold -= 0.08;
-  const canMove = forceMove || scored.some(s => !s.isStay && (s.score - adjustedStayScore) >= moveThreshold);
+const moveThreshold = (0.14 + traits.caution * 0.10) + (invCount === 0 && Number(start) === 1 ? 0.06 : 0) - (invCount >= 2 ? 0.06 : 0);
+  const canMove = forceLeaveCorn || forceMove || scored.some(s => !s.isStay && (s.score - adjustedStayScore) >= moveThreshold);
   if(!canMove) return { source: npc.id, type: "STAY", payload: {} };
 
   // Deterministic weighted choice among the top few candidates.
   // More cautious NPCs behave more deterministically (lower temperature).
-  // Slightly higher randomness outside the strategic mid-game to avoid NPC "traffic jams".
-  const temperature = 0.60 - traits.caution * 0.30; // ~0.30..0.60
-  const pool = scored.filter(s => !s.isStay).slice(0, 6);
+  // Movement randomness is phase-dependent: chaos => more exploration, strategic => more deterministic.
+  const prof = phaseProfile || { randomness: 0.25 };
+  const temperature = (0.38 + prof.randomness * 0.35) - traits.caution * 0.22; // ~0.20..0.75
+  // If we are forcing a Cornucopia exit, prefer a simple 1-step route (clean dispersal).
+  const poolBase = scored.filter(s => !s.isStay);
+  const pool1 = forceLeaveCorn ? poolBase.filter(s => s.steps === 1) : poolBase;
+  const pool = (pool1.length ? pool1 : poolBase).slice(0, 6);
   const pickR = hash01(seed, day, `move_pick|${npc.id}`);
   const chosen = weightedPick(pool, pickR, temperature) || pool[0];
 
@@ -348,6 +625,29 @@ function scoreArea(world, npc, areaId, steps, traits, visitedSet, { seed, day })
   const a = world.map?.areasById?.[String(areaId)];
   if(!a) return -1e9;
   if(a.isActive === false) return -1e9;
+  // Hard avoid areas that are not enterable (e.g., water without bridge).
+  if(a.hasWater && !a.hasBridge) return -1e9;
+  // Can't enter water without a bridge.
+  if(a.hasWater && !a.hasBridge) return -1e9;
+
+  // Territory noise (System 4)
+  // - Healthy NPCs are attracted to noise (more so if they can deal damage)
+  // - NPCs without damage items tend to avoid noisy zones
+  // - Injured NPCs avoid noise strongly
+  const noise = a.noiseState || "quiet";
+  const hpP = hpPercent(npc);
+  const offensive = hasDamageItem(npc.inventory);
+
+  let noiseBonus = 0;
+  if(hpP < 0.30){
+    noiseBonus = (noise === "noisy") ? -0.18 : (noise === "highly_noisy" ? -0.35 : +0.05);
+  } else if(!offensive){
+    noiseBonus = (noise === "noisy") ? -0.06 : (noise === "highly_noisy" ? -0.14 : 0);
+  } else if(hpP >= 0.70){
+    noiseBonus = (noise === "noisy") ? 0.18 : (noise === "highly_noisy" ? 0.32 : 0);
+  } else {
+    noiseBonus = (noise === "noisy") ? 0.10 : (noise === "highly_noisy" ? 0.20 : 0);
+  }
 
   // Hard avoid areas that will vanish tomorrow.
   if(a.willCloseOnDay != null && Number(a.willCloseOnDay) === day + 1) return -999;
@@ -356,8 +656,32 @@ function scoreArea(world, npc, areaId, steps, traits, visitedSet, { seed, day })
   const groundCount = Array.isArray(a.groundItems) ? a.groundItems.length : 0;
   const creatures = (a.activeElements || []).filter(e => e?.kind === "creature").length;
 
+  // Hidden area personality (only trusted if the NPC has been there before, or it is their current area).
+  const canReadAreaFeel = known || Number(areaId) === Number(npc.areaId);
+  const tags = canReadAreaFeel && Array.isArray(a.tags) ? a.tags : [];
+  const history = canReadAreaFeel && Array.isArray(a.historyTags) ? a.historyTags : [];
+  const hasHist = (tag) => history.some(h => h && h.tag === tag && Number(h.expiresDay || 0) >= Number(day));
+
   const lootValue = known ? (groundCount * 0.35) : 0.10;
   const foodValue = (a.hasFood ? 0.45 : 0) + (a.hasWater ? 0.18 : 0);
+
+  // Personality-based interpretation of tags.
+  let tagBonus = 0;
+  if(tags.includes("rich_loot")) tagBonus += 0.18 + traits.greed * 0.22 - traits.caution * 0.05;
+  if(tags.includes("quiet")) tagBonus += (hpP < 0.55 ? (0.14 + traits.caution * 0.12) : (-0.03 + traits.caution * 0.04)) - (offensive && hpP >= 0.75 ? 0.08 : 0);
+  if(tags.includes("sheltered")) tagBonus += (hpP < 0.65 ? (0.10 + traits.caution * 0.10) : (0.03 + traits.caution * 0.03));
+  if(tags.includes("exposed")) tagBonus -= (hpP < 0.55 ? (0.10 + traits.caution * 0.12) : (0.03 + traits.caution * 0.05));
+  if(tags.includes("hazard")) tagBonus -= (0.16 + traits.caution * 0.28) + (hpP < 0.45 ? 0.10 : 0);
+  // Light hazard awareness even without the hazard tag (older saves).
+  if(canReadAreaFeel && a.hazard && a.hazard.type) tagBonus -= (0.10 + traits.caution * 0.18);
+
+  // Hot-zone memory.
+  let historyBonus = 0;
+  if(hasHist("recent_death")) historyBonus += (offensive ? 0.03 : -0.05) - (traits.caution * 0.22) - (hpP < 0.50 ? 0.10 : 0);
+  if(hasHist("recent_fight")) historyBonus += (offensive ? (0.10 + (1 - traits.caution) * 0.18) : (-0.08 - traits.caution * 0.04));
+  if(hasHist("trap_suspected")) historyBonus -= (0.10 + traits.caution * 0.18);
+  if(hasHist("explosive_noise")) historyBonus -= (0.06 + traits.caution * 0.12);
+  if(hasHist("high_risk")) historyBonus -= (0.08 + traits.caution * 0.22) + (hpP < 0.55 ? 0.06 : 0);
 
   // Exploration bonus: unknown areas can be attractive, but only for less cautious NPCs.
   const explore = (!known && Number(areaId) !== Number(npc.areaId)) ? (0.18 + traits.greed * 0.18 - traits.caution * 0.12) : 0;
@@ -376,7 +700,8 @@ function scoreArea(world, npc, areaId, steps, traits, visitedSet, { seed, day })
   // Early Cornucopia: allow crowding so more NPCs contest loot.
   if(Number(areaId) === 1 && day === 1) crowdPenalty *= 0.2;
 
-  const fpNow = Number(npc.fp ?? 0);
+  // FP defaults to full if missing (older saves / initial generation).
+  const fpNow = Number(npc.fp ?? 100);
   let needFood = clamp01((40 - fpNow) / 40);
   if(fpNow <= 20) needFood = Math.min(1, needFood + 0.35);
   const safety = (a.threatClass === "safe" ? 0.45 : (a.threatClass === "neutral" ? 0.2 : -0.25));
@@ -389,6 +714,23 @@ function scoreArea(world, npc, areaId, steps, traits, visitedSet, { seed, day })
 
   const distanceCost = steps * 0.12;
 
+  // HUNT: healthy + armed NPCs bias toward populated areas (higher chance to find a target).
+  // We use the true world state here to keep behavior punchy; the player only sees diegetic hints.
+  let populationBonus = 0;
+  if(offensive && hpP >= 0.70){
+    let pop = 0;
+    const p2 = world?.entities?.player;
+    if(p2 && (p2.hp ?? 0) > 0 && Number(p2.areaId) === Number(areaId) && !(p2._today?.invisible)) pop++;
+    for(const other of Object.values(world?.entities?.npcs || {})){
+      if(!other || (other.hp ?? 0) <= 0) continue;
+      if(other.id === npc.id) continue;
+      if(Number(other.areaId) !== Number(areaId)) continue;
+      if(other._today?.invisible) continue;
+      pop++;
+    }
+    populationBonus = Math.min(0.45, pop * 0.14);
+  }
+
   const score =
     lootValue * (0.4 + traits.greed) +
     foodValue * (0.35 + needFood) +
@@ -398,7 +740,11 @@ function scoreArea(world, npc, areaId, steps, traits, visitedSet, { seed, day })
     revisitPenalty -
     crowdPenalty +
     explore -
-    recentPenalty;
+    recentPenalty +
+    noiseBonus +
+    populationBonus +
+    tagBonus +
+    historyBonus;
 
   // tiny deterministic jitter to break ties.
   return score + (hash01(seed, day, `area_jitter|${npc.id}|${areaId}`) * 0.01);
@@ -456,13 +802,13 @@ function estimateRisk(world, attacker, target){
   }
   const crowd = clamp01(count / 5);
   const hpRisk = clamp01((40 - (attacker.hp ?? 100)) / 40);
-  const fpRisk = clamp01((20 - (attacker.fp ?? 70)) / 20);
+  const fpRisk = clamp01((20 - (attacker.fp ?? 100)) / 20);
   return clamp01(crowd * 0.55 + hpRisk * 0.35 + fpRisk * 0.25);
 }
 
 function fearFactor(npc){
   const hp = npc.hp ?? 100;
-  const fp = npc.fp ?? 70;
+  const fp = npc.fp ?? 100;
   const lowHp = clamp01((35 - hp) / 35);
   const lowFp = clamp01((15 - fp) / 15);
   return clamp01(lowHp * 0.9 + lowFp * 0.6);
@@ -485,61 +831,9 @@ function itemValue(def, inst){
   return 0.15;
 }
 
-function chooseGroundItemIndex(world, npc, ground, traits, { seed, day, reservedHere, inCorn }){
-  if(!Array.isArray(ground) || ground.length === 0) return 0;
-
-  const fp = Number(npc.fp ?? 70);
-  const invItems = Array.isArray(npc.inventory?.items) ? npc.inventory.items : [];
-
-  const scored = [];
-  for(let i=0;i<ground.length;i++){
-    const inst = ground[i];
-    const def = getItemDef(inst?.defId);
-    let score = itemValue(def, inst);
-
-    // Light role preference (kept small so variety still happens).
-    if(def?.type === ItemTypes.WEAPON) score += traits.aggression * 0.10;
-    if(def?.type === ItemTypes.PROTECTION) score += traits.caution * 0.08;
-    if(def?.type === ItemTypes.CONSUMABLE && fp <= 25) score += 0.18;
-
-    // If already carrying the same item (and it's not stackable), reduce interest.
-    const alreadyHas = invItems.some(it => it?.defId === inst?.defId);
-    if(alreadyHas && !def?.stackable) score -= 0.22;
-
-    // Reservation penalty: discourage multiple NPCs aiming for the same exact index.
-    const resCount = reservedHere ? (reservedHere.get(i) || 0) : 0;
-    if(resCount > 0) score -= Math.min(0.60, resCount * 0.35);
-
-    // Deterministic jitter to break ties and add variety.
-    const jitter = (hash01(seed, day, `item_jitter|${npc.id}|${i}|${inst?.defId}`) - 0.5) * 0.36; // -0.18..+0.18
-    score += jitter;
-
-    scored.push({ idx: i, score });
-  }
-
-  scored.sort((a,b)=>b.score-a.score);
-
-  // Pick from a wider top-K using a weighted pick.
-  const k = Math.min(10, scored.length);
-  const pool = scored.slice(0, k).map((x, j) => ({
-    idx: x.idx,
-    // Ensure all weights positive.
-    w: Math.max(0.001, x.score + 0.35 - (j * 0.01))
-  }));
-
-  // Cornucopia early = higher temperature (more chaos/variety).
-  let temp = inCorn ? (day <= 3 ? 0.95 : 0.65) : 0.55;
-  // Greedy NPCs focus a bit more; cautious NPCs are more exploratory.
-  temp = clamp01(temp + (0.12 * (traits.caution - traits.greed)));
-
-  const r = hash01(seed, day, `collect_pick|${npc.id}|${npc.areaId}|${ground.length}`);
-  const picked = weightedPick(pool, r, temp);
-  return Number(picked?.idx ?? pool[0]?.idx ?? 0);
-}
-
 function maxStepsForNpc(npc){
   const hp = npc.hp ?? 100;
-  const fp = npc.fp ?? 70;
+  const fp = npc.fp ?? 100;
   return (hp > 30 && fp > 20) ? 3 : 1;
 }
 
@@ -548,10 +842,25 @@ function makeTraits(seed, id, district){
   const a = hash01(seed, 0, `trait_aggr|${id}|${district}`);
   const g = hash01(seed, 0, `trait_greed|${id}|${district}`);
   const c = hash01(seed, 0, `trait_caut|${id}|${district}`);
+  const p = hash01(seed, 0, `trait_pack|${id}|${district}`);
+  // District behavior gradient:
+  // 1 = more aggressive, 12 = more cautious/sneaky.
+  const d = Number(district ?? 12);
+  const t = clamp01((d - 1) / 11); // 0..1
+  const aggrBias = (1 - t) * 0.35;  // D1 +0.35 ... D12 +0
+  const cautBias = t * 0.35;       // D1 +0 ... D12 +0.35
+  const packBias = t * 0.40;       // stealthy/utility bias for low-power districts
+
+  const aggression = clamp01((0.25 + a * 0.75) + aggrBias - cautBias * 0.15);
+  const caution = clamp01((0.20 + c * 0.80) + cautBias - aggrBias * 0.10);
+  const packrat = clamp01((0.10 + p * 0.90) + packBias);
+
   return {
-    aggression: 0.25 + a * 0.75,
-    greed: 0.15 + g * 0.85,
-    caution: 0.20 + c * 0.80
+    aggression,
+    greed: clamp01(0.15 + g * 0.85),
+    caution,
+    // Loot style: higher = prefers utility/backpacks/safer pickups.
+    packrat
   };
 }
 
