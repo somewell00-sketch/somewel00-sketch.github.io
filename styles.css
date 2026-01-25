@@ -73,6 +73,11 @@ a{ color: var(--accent); }
   box-shadow: var(--shadow);
 }
 
+/* Prevent touch scrolling while dragging the map on mobile */
+.canvasWrap canvas{
+  touch-action: none;
+}
+
 .minimap{
   position:absolute;
   left: 12px;

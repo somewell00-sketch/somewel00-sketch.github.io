@@ -699,7 +699,7 @@ function renderGame(){
     canvas,
     getCurrentAreaId: () => world?.entities?.player?.areaId ?? 1,
     canMove: () => uiState.phase === "explore",
-    options: { followPlayer: true, zoom: 2.15, padding: 18 },
+    options: { followPlayer: true, zoom: 2.6, padding: 18, draggable: true, smooth: true, smoothness: 0.22 },
     onAreaClick: (id) => {
       uiState.focusedAreaId = id;
       handleAreaClick(id);

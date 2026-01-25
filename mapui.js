@@ -100,24 +100,43 @@ export class MapUI {
     // Rendering options
     // - followPlayer: keeps the current area centered and applies a zoom factor
     // - zoom: additional zoom multiplier (only meaningful when followPlayer=true)
+    // - draggable: allow panning the map by dragging
+    // - smooth: animate camera transitions between areas
+    // - smoothness: 0..1, higher = snappier (only meaningful when smooth=true)
     // - showViewport: draw the main map viewport rectangle (useful for minimaps)
     // - getViewportRect: () => {x0,y0,x1,y1} in geom coords
     this.options = Object.assign({
       followPlayer: false,
       zoom: 1,
       padding: 18,
+      draggable: false,
+      smooth: false,
+      smoothness: 0.22,
       showViewport: false,
       getViewportRect: null,
     }, options || {});
 
     // Current view transform (geom -> canvas)
     this._view = { s: 1, tx: 0, ty: 0, geomW: 1, geomH: 1, canvasW: this.canvas.width, canvasH: this.canvas.height };
+    this._viewTarget = null;
+    this._raf = null;
+    this._lastTs = null;
+
+    // Drag-to-pan state (in canvas pixels)
+    this._pan = { x: 0, y: 0 };
+    this._drag = { active: false, moved: false, startX: 0, startY: 0, lastX: 0, lastY: 0 };
 
     this.hoveredId = null;
 
     canvas.addEventListener("mousemove", (e) => this.handleMove(e));
     canvas.addEventListener("mouseleave", () => { this.hoveredId = null; this.render(); });
     canvas.addEventListener("click", (e) => this.handleClick(e));
+
+    // Pointer events for dragging (safer across mouse/touch)
+    canvas.addEventListener("pointerdown", (e) => this.handlePointerDown(e));
+    window.addEventListener("pointermove", (e) => this.handlePointerMove(e));
+    window.addEventListener("pointerup", (e) => this.handlePointerUp(e));
+    window.addEventListener("pointercancel", (e) => this.handlePointerUp(e));
   }
 
   setData({ world, paletteIndex=0 }){
@@ -167,6 +186,8 @@ export class MapUI {
   }
 
   handleClick(e){
+    // If the user dragged, don't treat it as a click-to-move.
+    if(this._drag?.moved) return;
     const {x,y} = this.canvasToWorld(e);
     const id = this.hitTest(x,y);
     if(id == null) return;
@@ -236,6 +257,12 @@ export class MapUI {
       tx = (cw / 2) - (px * s);
       ty = (ch / 2) - (py * s);
 
+      // Apply user pan (dragging) in canvas space.
+      if(!!this.options.draggable){
+        tx += (Number(this._pan?.x) || 0);
+        ty += (Number(this._pan?.y) || 0);
+      }
+
       // Clamp so the map doesn't drift too far outside the canvas.
       const minTx = cw - (gw * s) - pad;
       const maxTx = pad;
@@ -248,20 +275,111 @@ export class MapUI {
     return { s, tx, ty, geomW: gw, geomH: gh, canvasW: cw, canvasH: ch };
   }
 
-  render(){
+  // --- Drag-to-pan handlers (optional) ---
+  handlePointerDown(e){
+    if(!this.options.draggable) return;
+    // Only start drag on primary button/touch.
+    if(e.button != null && e.button !== 0) return;
+    this._drag.active = true;
+    this._drag.moved = false;
+    this._drag.startX = e.clientX;
+    this._drag.startY = e.clientY;
+    this._drag.lastX = e.clientX;
+    this._drag.lastY = e.clientY;
+    try { this.canvas.setPointerCapture?.(e.pointerId); } catch(_){ }
+  }
+
+  handlePointerMove(e){
+    if(!this.options.draggable) return;
+    if(!this._drag.active) return;
+    const dx = e.clientX - this._drag.lastX;
+    const dy = e.clientY - this._drag.lastY;
+    this._drag.lastX = e.clientX;
+    this._drag.lastY = e.clientY;
+
+    const totalDx = e.clientX - this._drag.startX;
+    const totalDy = e.clientY - this._drag.startY;
+    if(Math.hypot(totalDx, totalDy) > 4) this._drag.moved = true;
+
+    this._pan.x += dx;
+    this._pan.y += dy;
+
+    // Re-render smoothly if enabled.
+    this.render();
+  }
+
+  handlePointerUp(e){
+    if(!this.options.draggable) return;
+    if(!this._drag.active) return;
+    this._drag.active = false;
+    // If it was just a tap (no move), allow normal click handling.
+    // If it was a drag, keep the pan and stop.
+    // Reset moved flag shortly after so a click event that fires right after doesn't move.
+    if(this._drag.moved){
+      setTimeout(() => { if(this._drag) this._drag.moved = false; }, 0);
+    }
+  }
+
+  _stepAnimation(ts){
+    if(!this.world || !this.geom) return;
+    const target = this._viewTarget;
+    if(!target) return;
+
+    const cur = this._view || target;
+    const last = this._lastTs;
+    const dt = (typeof last === "number") ? Math.min(64, Math.max(0, ts - last)) : 16.67;
+    this._lastTs = ts;
+
+    const smoothness = Math.max(0.01, Math.min(0.85, Number(this.options.smoothness) || 0.22));
+    // Convert smoothness to a per-frame lerp based on dt.
+    const a = 1 - Math.pow(1 - smoothness, dt / 16.67);
+
+    const lerp = (x, y) => x + (y - x) * a;
+
+    const next = {
+      s: lerp(cur.s, target.s),
+      tx: lerp(cur.tx, target.tx),
+      ty: lerp(cur.ty, target.ty),
+      geomW: target.geomW,
+      geomH: target.geomH,
+      canvasW: target.canvasW,
+      canvasH: target.canvasH,
+    };
+
+    this._view = next;
+    this._renderWithCurrentView();
+
+    const done = (Math.abs(next.s - target.s) < 0.001) &&
+      (Math.abs(next.tx - target.tx) < 0.25) &&
+      (Math.abs(next.ty - target.ty) < 0.25);
+
+    if(!done){
+      this._raf = requestAnimationFrame((t) => this._stepAnimation(t));
+    } else {
+      this._view = target;
+      this._raf = null;
+      this._lastTs = null;
+      this._renderWithCurrentView();
+    }
+  }
+
+  _ensureAnimating(){
+    if(this._raf) return;
+    this._raf = requestAnimationFrame((t) => this._stepAnimation(t));
+  }
+
+  _renderWithCurrentView(){
+    // Internal: same as render(), but assumes this._view already set.
     if(!this.world || !this.geom) return;
 
     const ctx = this.ctx;
     const canvasW = this.canvas.width;
     const canvasH = this.canvas.height;
-    const { width:W, height:H, blob, cells, river } = this.geom;
+    const { blob, cells, river } = this.geom;
     const pal = PALETTES[this.paletteIndex] || PALETTES[0];
 
     const visited = new Set(this.world.flags.visitedAreas);
     const currentId = this.world.entities.player.areaId;
-
-    // Compute and cache the current view transform.
-    this._view = this.computeView();
 
     // Clear in canvas space.
     ctx.setTransform(1,0,0,1,0,0);
@@ -390,7 +508,7 @@ export class MapUI {
     // Back to canvas space
     ctx.restore();
 
-    // Minimap viewport indicator (draw in geom space using the same minimap transform)
+    // Viewport indicator (for minimap)
     if(this.options.showViewport && typeof this.options.getViewportRect === "function"){
       const r = this.options.getViewportRect();
       if(r && Number.isFinite(r.x0) && Number.isFinite(r.y0) && Number.isFinite(r.x1) && Number.isFinite(r.y1)){
@@ -404,7 +522,7 @@ export class MapUI {
       }
     }
 
-    // vignette (FIXED)
+    // vignette
     const CX = canvasW/2, CY = canvasH/2;
     const baseR = Math.min(canvasW, canvasH) * 0.55;
     const vg = ctx.createRadialGradient(CX, CY, baseR*0.55, CX, CY, baseR*1.55);
@@ -412,6 +530,24 @@ export class MapUI {
     vg.addColorStop(1, "rgba(0,0,0,0.45)");
     ctx.fillStyle = vg;
     ctx.fillRect(0,0,canvasW,canvasH);
+  }
+
+  render(){
+    if(!this.world || !this.geom) return;
+
+    // Compute the target view transform.
+    this._viewTarget = this.computeView();
+
+    if(!!this.options.smooth){
+      // If we don't have a current view yet, snap once then animate after.
+      if(!this._view || !Number.isFinite(this._view.s)) this._view = this._viewTarget;
+      this._ensureAnimating();
+      return;
+    }
+
+    // No smoothing: snap to target and draw.
+    this._view = this._viewTarget;
+    this._renderWithCurrentView();
   }
 
   getAreaInfo(id){
