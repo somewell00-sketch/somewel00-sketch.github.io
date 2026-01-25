@@ -621,6 +621,7 @@ function renderGame(){
 
   const dayEl = document.getElementById("day");
   const seedEl = document.getElementById("seed");
+  const fallenEl = document.getElementById("fallenTributes");
 
   const curAreaEl = document.getElementById("curArea");
 
@@ -1102,6 +1103,15 @@ function renderGame(){
 
     dayEl.textContent = String(world.meta.day);
     seedEl.textContent = String(world.meta.seed);
+
+    if(fallenEl){
+      const npcs = world?.entities?.npcs || {};
+      const ids = Object.keys(npcs);
+      const fallenNpcs = ids.filter(id => (npcs[id]?.hp ?? 0) <= 0).length;
+      const fallenPlayer = ((world?.entities?.player?.hp ?? 0) <= 0) ? 1 : 0;
+      const fallen = fallenNpcs + fallenPlayer;
+      fallenEl.textContent = `${fallen} fallen tributes`;
+    }
 
     const p = world.entities.player;
 
