@@ -1,13 +1,4 @@
-import {
-  // Prevent leaving Cornucopia empty-handed (early days)
-  const start = Number(npc.areaId);
-  const here = world.map?.areasById?.[String(start)];
-  const hereGround = Array.isArray(here?.groundItems) ? here.groundItems : [];
-  const invCount = inventoryCount(npc.inventory);
-  if (start === 1 && invCount === 0 && hereGround.length > 0 && day <= 2) {
-    return { source: npc.id, type: "STAY", payload: { reason: "corn_first_loot" } };
-  }
- getItemDef, ItemTypes, strongestWeaponInInventory, inventoryCount, INVENTORY_LIMIT } from "./items.js";
+import { getItemDef, ItemTypes, strongestWeaponInInventory, inventoryCount, INVENTORY_LIMIT } from "./items.js";
 
 // NPC AI (incremental, score-based):
 // - builds a limited ObservedWorld per NPC
