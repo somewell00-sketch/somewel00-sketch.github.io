@@ -170,6 +170,11 @@ export class MapUI {
     const {x,y} = this.canvasToWorld(e);
     const id = this.hitTest(x,y);
     if(id == null) return;
+    // Clicking should follow the same rules as hovering:
+    // only allow moves when movement is enabled and the destination is visitable.
+    const enabled = !!this.canMove();
+    if(!enabled) return;
+    if(!this.isVisitable(id)) return;
     this.onAreaClick(id);
   }
 
@@ -202,7 +207,8 @@ export class MapUI {
     const baseTy = (ch - gh * baseScale) / 2;
 
     const follow = !!this.options.followPlayer;
-    const zoom = follow ? (Number(this.options.zoom) || 2.15) : 1;
+    // Default zoom when following the player (can be overridden via options.zoom)
+    const zoom = follow ? (Number(this.options.zoom) || 2.6) : 1;
     const pad = Number(this.options.padding) || 18;
 
     let s = baseScale * zoom;
