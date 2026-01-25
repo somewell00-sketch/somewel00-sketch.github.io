@@ -112,41 +112,44 @@ function decidePosture(world, npc, obs, traits, { seed, day, playerDistrict }){
   const hasWater = !!area?.hasWater;
   const ground = Array.isArray(area?.groundItems) ? area.groundItems : [];
 
-  // FORCE_COLLECT_CORN: Cornucopia scramble.
-  // Cornucopia starts with lots of finite loot. If an NPC still has space,
-  // it should keep trying to collect there (especially early), otherwise
-  // the ground ends up cluttered with untouched items.
+  // --- Cornucopia-specific NPC behavior (Area 1 only) ---
+  // Memory (temporary):
+  // - cornCollectTries: number of COLLECT attempts made in the Cornucopia.
+  // - cornHasWeapon: true if the NPC has collected any weapon.
+  // Outside Area 1, the AI works as usual.
   const inCorn = Number(area?.id) === 1;
-  if(inCorn && ground.length && invN < INVENTORY_LIMIT){
-    // Strong push to collect on day 1–3.
-    const baseChance = (day <= 3) ? 0.92 : 0.55;
-    // If they have 0–1 items, they are still gearing up.
-    // Empty-handed tributes are extra motivated to grab *something* (especially a weapon).
-    const invBoost = (invN === 0) ? 0.55 : (invN === 1 ? 0.25 : 0);
-    const rForce = hash01(seed, day, `corn_collect|${npc.id}|${invN}|${ground.length}`);
-    if(rForce < Math.min(0.98, baseChance + invBoost)){
-    const scoredItems = [];
-    for(let i=0;i<ground.length;i++){
-      const inst = ground[i];
-      const def = getItemDef(inst?.defId);
-      const dmg = Number(def?.damage ?? 0);
-      // Cornucopia: empty-handed NPCs strongly prefer damage-capable items first.
-      const firstWeaponBoost = (invN === 0 && dmg > 0) ? 25 : 0;
-      scoredItems.push({ idx: i, score: itemValue(def, inst) + firstWeaponBoost });
-    }
-    scoredItems.sort((a,b)=>b.score-a.score);
-    const topK = scoredItems.slice(0, Math.min(4, scoredItems.length));
-    const r = hash01(seed, day, `collect_pick|${npc.id}|corn`);
-    const pickPos = Math.floor(r * topK.length);
-    const chosen = topK[Math.max(0, Math.min(topK.length - 1, pickPos))];
-    // Mark that this NPC is grabbing something from the Cornucopia today.
-    // Movement logic uses this to force immediate dispersal.
+  if(inCorn){
     npc.memory = npc.memory || {};
-    npc.memory._plannedCornCollect = true;
-    // Reset empty-handed attempt counter once they commit to grabbing something.
-    npc.memory.cornEmptyTries = 0;
-    return { source: npc.id, type: "COLLECT", payload: { itemIndex: chosen.idx } };
+    if(npc.memory.cornCollectTries == null) npc.memory.cornCollectTries = 0;
+    if(npc.memory.cornHasWeapon == null) npc.memory.cornHasWeapon = false;
+
+    // If they already have a weapon, treat this as "has weapon" for the exit rule.
+    if(!npc.memory.cornHasWeapon){
+      const w = strongestWeaponInInventory(npc.inventory);
+      if(w) npc.memory.cornHasWeapon = true;
     }
+
+    const invFull = invN >= INVENTORY_LIMIT;
+    const noItemsLeft = ground.length === 0;
+    const triedTwiceNoWeapon = (npc.memory.cornCollectTries >= 2) && !npc.memory.cornHasWeapon;
+    const canLeaveCorn = npc.memory.cornHasWeapon || triedTwiceNoWeapon || noItemsLeft || invFull;
+
+    // If not allowed to leave yet, the NPC must keep trying to COLLECT (no swapping in cornucopia).
+    if(!canLeaveCorn){
+      if(!invFull && ground.length){
+        // Prefer the highest-value ground item (simple, legible early-game behavior).
+        let bestIdx = 0;
+        let bestScore = -1e9;
+        for(let i=0;i<ground.length;i++){
+          const inst = ground[i];
+          const def = getItemDef(inst?.defId);
+          const score = itemValue(def, inst);
+          if(score > bestScore){ bestScore = score; bestIdx = i; }
+        }
+        return { source: npc.id, type: "COLLECT", payload: { itemIndex: bestIdx } };
+      }
+    }
+    // If they can leave, fall through to normal logic (attack/defend/drink/etc.).
   }
 
   // Hunger/FP: if low and water exists, prefer drinking.
@@ -295,10 +298,35 @@ function decideMove(world, npc, obs, traits, { seed, day }){
   const currentArea = world.map?.areasById?.[String(npc.areaId)];
   const inCornucopia = Number(currentArea?.id) === 1;
   const invCountNow = inventoryCount(npc.inventory);
-  const grabbedCornToday = !!npc?.memory?._plannedCornCollect;
   const wantsFlee = !!npc?.memory?._wantsFlee;
 
   const visitedSet = new Set(Array.isArray(npc.memory?.visited) ? npc.memory.visited : []);
+
+  // Cornucopia exit gating: NPCs cannot leave Area 1 until an exit condition is met.
+  // Exit immediately once allowed:
+  // - collected a weapon
+  // - tried to collect 2 times without getting a weapon
+  // - no more items on the ground
+  // - inventory is full
+  let forceLeaveCorn = false;
+  if(inCornucopia){
+    npc.memory = npc.memory || {};
+    if(npc.memory.cornCollectTries == null) npc.memory.cornCollectTries = 0;
+    if(npc.memory.cornHasWeapon == null) npc.memory.cornHasWeapon = false;
+    if(!npc.memory.cornHasWeapon){
+      const w = strongestWeaponInInventory(npc.inventory);
+      if(w) npc.memory.cornHasWeapon = true;
+    }
+    const hereGround = Array.isArray(currentArea?.groundItems) ? currentArea.groundItems : [];
+    const invFull = invCountNow >= INVENTORY_LIMIT;
+    const noItemsLeft = hereGround.length === 0;
+    const triedTwiceNoWeapon = (npc.memory.cornCollectTries >= 2) && !npc.memory.cornHasWeapon;
+    const canLeaveCorn = npc.memory.cornHasWeapon || triedTwiceNoWeapon || noItemsLeft || invFull;
+    if(!canLeaveCorn){
+      return { source: npc.id, type: "STAY", payload: { reason: "corn_locked" } };
+    }
+    forceLeaveCorn = true;
+  }
 
   // BFS up to 3 steps, but we score only known areas well. Unknown areas get conservative estimates.
   const start = Number(npc.areaId);
@@ -397,7 +425,7 @@ const adjustedStayScore = stayScore + stayBias;
   const forceMove = (!cornBlocksForcedMove) && (emptyHere || forceLeaveCorn || wantsFlee || (Number(start) === 1 && invCount >= 2 && cornLootLow));
 
   const moveThreshold = (0.14 + traits.caution * 0.10) + (invCount === 0 && Number(start) === 1 ? 0.06 : 0) - (invCount >= 2 ? 0.06 : 0);
-  const canMove = forceMove || scored.some(s => !s.isStay && (s.score - adjustedStayScore) >= moveThreshold);
+  const canMove = forceLeaveCorn || forceMove || scored.some(s => !s.isStay && (s.score - adjustedStayScore) >= moveThreshold);
   if(!canMove) return { source: npc.id, type: "STAY", payload: {} };
 
   // Deterministic weighted choice among the top few candidates.

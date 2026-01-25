@@ -999,6 +999,16 @@ export function commitPlayerAction(world, action){
       }
     }
 
+    // Cornucopia tracking: if NPCs were contenders for this collect in Area 1, count as an attempt.
+    if(Number(area.id) === 1){
+      for(const c of contenders){
+        if(!c || !c.actor || c.id === "player") continue;
+        c.actor.memory = c.actor.memory || {};
+        if(c.actor.memory.cornCollectTries == null) c.actor.memory.cornCollectTries = 0;
+        c.actor.memory.cornCollectTries += 1;
+      }
+    }
+
     // Decide winner: higher Dexterity wins. Tie for best => fight now.
     const scored = contenders.map(c => ({
       ...c,
@@ -1057,6 +1067,15 @@ export function commitPlayerAction(world, action){
     }
 
     events.push({ type:"COLLECT", ok:true, who: winnerId, itemDefId: removed.defId, qty: removed.qty || 1, areaId: area.id });
+
+    // Cornucopia memory: mark weapon pickup for the winner.
+    if(Number(area.id) === 1 && winnerId && winnerId !== "player"){
+      const def = getItemDef(removed.defId);
+      if(def?.type === ItemTypes.WEAPON){
+        winner.memory = winner.memory || {};
+        winner.memory.cornHasWeapon = true;
+      }
+    }
     return finalize();
   }
 
@@ -2104,6 +2123,17 @@ function resolveCollectContests(world, collectReqs, events, { seed, day, killsTh
 
       if(contenders.length === 0) continue;
 
+      // Cornucopia tracking: each NPC COLLECT intent in Area 1 increments its attempt counter
+      // (even if they lose the contest or fail to pick up).
+      if(Number(area.id) === 1){
+        for(const c of contenders){
+          if(c.who === "player") continue;
+          c.actor.memory = c.actor.memory || {};
+          if(c.actor.memory.cornCollectTries == null) c.actor.memory.cornCollectTries = 0;
+          c.actor.memory.cornCollectTries += 1;
+        }
+      }
+
       // FP cost for attempting to collect (charged regardless of outcome).
       for(const c of contenders){
         if(c.who === "player") continue; // player already paid at commit time
@@ -2155,12 +2185,25 @@ function resolveCollectContests(world, collectReqs, events, { seed, day, killsTh
         events.push({ type:"COLLECT", ok:true, who: winner.who, itemDefId: removed.defId, qty: removed.qty || 1, areaId: area.id, note:"consumed_on_collect" });
         continue;
       }
-      const ok = tryAddWithNpcAutoDiscard(winner.actor, removed, events, { areaId: area.id });
+      // Cornucopia rule: NPCs do not auto-swap items there.
+      // Outside the Cornucopia, NPCs may discard the worst item to pick up better loot.
+      const ok = (Number(area.id) === 1)
+        ? addToInventory(winner.actor.inventory, removed)
+        : tryAddWithNpcAutoDiscard(winner.actor, removed, events, { areaId: area.id });
+
       if(!ok.ok){
-        // Put it back at the front if we couldn't add (shouldn't happen if count check passed).
+        // Put it back at the front if we couldn't add.
         area.groundItems.unshift(removed);
         events.push({ type:"COLLECT", ok:false, who: winner.who, reason: ok.reason || "failed", itemDefId: removed.defId, areaId: area.id });
       } else {
+        // Cornucopia memory: mark weapon pickup.
+        if(Number(area.id) === 1 && winner.who !== "player"){
+          const def = getItemDef(removed.defId);
+          if(def?.type === ItemTypes.WEAPON){
+            winner.actor.memory = winner.actor.memory || {};
+            winner.actor.memory.cornHasWeapon = true;
+          }
+        }
         events.push({ type:"COLLECT", ok:true, who: winner.who, itemDefId: removed.defId, qty: removed.qty || 1, areaId: area.id });
       }
     }
