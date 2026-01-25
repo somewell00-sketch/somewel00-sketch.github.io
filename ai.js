@@ -137,16 +137,31 @@ function decidePosture(world, npc, obs, traits, { seed, day, playerDistrict }){
     // If not allowed to leave yet, the NPC must keep trying to COLLECT (no swapping in cornucopia).
     if(!canLeaveCorn){
       if(!invFull && ground.length){
-        // Prefer the highest-value ground item (simple, legible early-game behavior).
-        let bestIdx = 0;
-        let bestScore = -1e9;
+        // Cornucopia needs to "spread" NPCs across items; otherwise many will contest the same
+        // top-valued pickup and leave empty-handed after 2 tries.
+        // We do a weighted pick across ALL ground items (deterministic per NPC/day) so
+        // early-game loot gets distributed quickly and more believably.
+
+        const opts = [];
         for(let i=0;i<ground.length;i++){
           const inst = ground[i];
           const def = getItemDef(inst?.defId);
-          const score = itemValue(def, inst);
-          if(score > bestScore){ bestScore = score; bestIdx = i; }
+          let v = itemValue(def, inst);
+
+          // Prefer weapons early, but don't force everyone onto the same single weapon.
+          if(def?.type === ItemTypes.WEAPON) v *= 1.8;
+
+          // If the NPC still has no weapon, slightly deprioritize non-weapons.
+          if(!npc.memory.cornHasWeapon && def?.type !== ItemTypes.WEAPON) v *= 0.85;
+
+          // Add a tiny NPC-specific jitter so ties don't collapse to the same index.
+          v += hash01(seed, day, `corn_item_jitter|${npc.id}|${i}`) * 0.02;
+
+          opts.push({ idx: i, score: v });
         }
-        return { source: npc.id, type: "COLLECT", payload: { itemIndex: bestIdx } };
+
+        const pick = weightedPick(opts, hash01(seed, day, `corn_pick|${npc.id}`), 0.35) || opts[0];
+        return { source: npc.id, type: "COLLECT", payload: { itemIndex: pick.idx } };
       }
     }
     // If they can leave, fall through to normal logic (attack/defend/drink/etc.).

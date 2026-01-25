@@ -125,20 +125,19 @@ function decidePosture(world, npc, obs, traits, { seed, day, playerDistrict }){
     const invBoost = (invN === 0) ? 0.55 : (invN === 1 ? 0.25 : 0);
     const rForce = hash01(seed, day, `corn_collect|${npc.id}|${invN}|${ground.length}`);
     if(rForce < Math.min(0.98, baseChance + invBoost)){
-    const scoredItems = [];
+    // Spread picks across the whole pile so most NPCs actually loot something,
+    // instead of dogpiling the same single "best" item.
+    const opts = [];
     for(let i=0;i<ground.length;i++){
       const inst = ground[i];
       const def = getItemDef(inst?.defId);
-      const dmg = Number(def?.damage ?? 0);
-      // Cornucopia: empty-handed NPCs strongly prefer damage-capable items first.
-      const firstWeaponBoost = (invN === 0 && dmg > 0) ? 25 : 0;
-      scoredItems.push({ idx: i, score: itemValue(def, inst) + firstWeaponBoost });
+      let v = itemValue(def, inst);
+      if(def?.type === ItemTypes.WEAPON) v *= 1.8;
+      if(invN === 0 && def?.type !== ItemTypes.WEAPON) v *= 0.85;
+      v += hash01(seed, day, `corn_item_jitter|${npc.id}|${i}`) * 0.02;
+      opts.push({ idx: i, score: v });
     }
-    scoredItems.sort((a,b)=>b.score-a.score);
-    const topK = scoredItems.slice(0, Math.min(4, scoredItems.length));
-    const r = hash01(seed, day, `collect_pick|${npc.id}|corn`);
-    const pickPos = Math.floor(r * topK.length);
-    const chosen = topK[Math.max(0, Math.min(topK.length - 1, pickPos))];
+    const chosen = weightedPick(opts, hash01(seed, day, `collect_pick|${npc.id}|corn`), 0.35) || opts[0];
     // Mark that this NPC is grabbing something from the Cornucopia today.
     // Movement logic uses this to force immediate dispersal.
     npc.memory = npc.memory || {};
