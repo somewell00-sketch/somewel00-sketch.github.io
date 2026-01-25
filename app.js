@@ -80,6 +80,10 @@ try {
 
 let world = null;
 
+// --- Minimal UI-only toast log (for death/victory recap) ---
+// Stored in-memory in app.js only (does not affect sim/ai/state/sync).
+let toastLog = [];
+
 const uiState = {
   focusedAreaId: 1,
   phase: "needs_action", // needs_action | explore
@@ -599,6 +603,8 @@ function renderStart(){
     const saved = loadFromLocal();
     if(!saved){ alert("No save found."); return; }
     world = saved;
+    // UI-only: reset toast log so recaps match this resumed run.
+    toastLog = [];
     uiState.focusedAreaId = world.entities.player.areaId;
     uiState.phase = "needs_action";
     uiState.movesUsed = 0;
@@ -625,6 +631,12 @@ function startNewGame(mapSize, totalPlayers, playerDistrict, playerAttrs){
   });
 
   world = createInitialWorld({ seed, mapSize, mapData, totalPlayers, playerDistrict, playerAttrs });
+
+  // UI-only: reset toast log for the new run.
+  toastLog = [];
+
+  // UI-only: reset toast log for a fresh run.
+  toastLog = [];
 
   uiState.focusedAreaId = 1;
   uiState.phase = "needs_action";
@@ -831,15 +843,36 @@ function renderGame(){
 
   const toastHost = document.getElementById("toastHost");
 
-  function pushToast(content, { kind="info", ttl=5000 } = {}){
+  function pushToast(content, { kind="info", ttl=5000, meta=null } = {}){
     if(!toastHost) return;
     const el = document.createElement("div");
     el.className = `toast ${kind}`;
+
+    // Capture a plain-text representation for the toast log (UI-only).
+    let toastText = "";
     if(Array.isArray(content)){
-      el.innerHTML = content.map(line => `<div class="toastLine">${escapeHtml(String(line))}</div>`).join("");
+      const lines = content.map(line => String(line));
+      toastText = lines.join("\n");
+      el.innerHTML = lines.map(line => `<div class="toastLine">${escapeHtml(String(line))}</div>`).join("");
     } else {
-      el.textContent = String(content ?? "");
+      toastText = String(content ?? "");
+      el.textContent = toastText;
     }
+
+    // Keep an in-memory log of what was shown via toasts, for death/victory recaps.
+    // This does not affect game rules, state sync, or rendering order.
+    try {
+      toastLog.push({
+        t: Date.now(),
+        day: Number(world?.meta?.day ?? 0),
+        kind,
+        text: toastText,
+        meta: meta || null
+      });
+      // Avoid unbounded growth in long sessions.
+      if(toastLog.length > 500) toastLog.splice(0, toastLog.length - 500);
+    } catch(_e) {}
+
     toastHost.appendChild(el);
 
     const remove = () => {
@@ -976,7 +1009,7 @@ function renderGame(){
     // This is additive and does not alter the existing event formatting/flow.
     for(const e of (events || [])){
       const line = __evtPlayerDamageToastLine(e);
-      if(line) pushToast(line, { kind:"event", ttl: 10000 });
+      if(line) pushToast(line, { kind:"event", ttl: 10000, meta: { damageToPlayer: true, eventType: e?.type || "" } });
     }
     const lines = formatEvents(events).filter(Boolean);
     if(!lines.length) return;
@@ -1796,12 +1829,31 @@ function renderGame(){
       ? "Your area vanished. You died."
       : "You died.";
 
+    // UI-only: best-effort cause from the most recent toast tagged as player damage.
+    const lastDamageToast = (() => {
+      for(let i = (toastLog?.length || 0) - 1; i >= 0; i--){
+        const it = toastLog[i];
+        if(it?.meta?.damageToPlayer) return it;
+      }
+      return null;
+    })();
+    const causeText = (lastDamageToast?.text || "").trim() || "Unknown";
+
     const overlay = document.createElement("div");
     overlay.className = "modalOverlay";
     overlay.innerHTML = `
       <div class="modal">
         <div class="h1" style="margin:0;">${title}</div>
         <div class="muted" style="margin-top:8px;">${msg}</div>
+
+        <div class="muted small" style="margin-top:10px;"><strong>Cause:</strong> <span id="deathCause"></span></div>
+
+        <div class="row" style="margin-top:10px; justify-content:space-between; gap:8px; align-items:center;">
+          <button id="toggleEventLog" class="btn">Show event log</button>
+        </div>
+        <div id="eventLogWrap" class="section" style="display:none; margin-top:8px; padding:10px; max-height:240px; overflow:auto; border-radius:12px;">
+          <div id="eventLogList" class="muted small" style="white-space:pre-wrap;"></div>
+        </div>
 
         <div class="row" style="margin-top:14px; justify-content:flex-end; gap:8px;">
           <button id="restartGame" class="btn danger">Restart</button>
@@ -1810,9 +1862,35 @@ function renderGame(){
     `;
     document.body.appendChild(overlay);
 
+    // Fill cause + log (UI-only, no gameplay impact).
+    try {
+      const causeEl = overlay.querySelector("#deathCause");
+      if(causeEl) causeEl.textContent = causeText;
+
+      const toggleBtn = overlay.querySelector("#toggleEventLog");
+      const wrap = overlay.querySelector("#eventLogWrap");
+      const listEl = overlay.querySelector("#eventLogList");
+      if(listEl){
+        const lines = (toastLog || []).map(it => {
+          const d = Number(it?.day ?? 0);
+          const prefix = d ? `[Day ${d}] ` : "";
+          return prefix + String(it?.text ?? "");
+        });
+        listEl.textContent = lines.join("\n\n");
+      }
+      if(toggleBtn && wrap){
+        toggleBtn.onclick = () => {
+          const open = wrap.style.display !== "none";
+          wrap.style.display = open ? "none" : "block";
+          toggleBtn.textContent = open ? "Show event log" : "Hide event log";
+        };
+      }
+    } catch(_e) {}
+
     overlay.querySelector("#restartGame").onclick = () => {
       clearLocal();
       world = null;
+      toastLog = [];
       uiState.deathDialogShown = false;
       overlay.remove();
       renderStart();
@@ -1830,6 +1908,13 @@ function renderGame(){
         <div class="h1" style="margin:0;">Victory</div>
         <div class="muted" style="margin-top:8px;">Congratulations. You are the last tribute alive.</div>
 
+        <div class="row" style="margin-top:10px; justify-content:space-between; gap:8px; align-items:center;">
+          <button id="toggleEventLog" class="btn">Show event log</button>
+        </div>
+        <div id="eventLogWrap" class="section" style="display:none; margin-top:8px; padding:10px; max-height:240px; overflow:auto; border-radius:12px;">
+          <div id="eventLogList" class="muted small" style="white-space:pre-wrap;"></div>
+        </div>
+
         <div class="row" style="margin-top:14px; justify-content:flex-end; gap:8px;">
           <button id="restartGame" class="btn primary">Restart</button>
         </div>
@@ -1837,9 +1922,32 @@ function renderGame(){
     `;
     document.body.appendChild(overlay);
 
+    // Fill log (UI-only, no gameplay impact).
+    try {
+      const toggleBtn = overlay.querySelector("#toggleEventLog");
+      const wrap = overlay.querySelector("#eventLogWrap");
+      const listEl = overlay.querySelector("#eventLogList");
+      if(listEl){
+        const lines = (toastLog || []).map(it => {
+          const d = Number(it?.day ?? 0);
+          const prefix = d ? `[Day ${d}] ` : "";
+          return prefix + String(it?.text ?? "");
+        });
+        listEl.textContent = lines.join("\n\n");
+      }
+      if(toggleBtn && wrap){
+        toggleBtn.onclick = () => {
+          const open = wrap.style.display !== "none";
+          wrap.style.display = open ? "none" : "block";
+          toggleBtn.textContent = open ? "Show event log" : "Hide event log";
+        };
+      }
+    } catch(_e) {}
+
     overlay.querySelector("#restartGame").onclick = () => {
       clearLocal();
       world = null;
+      toastLog = [];
       uiState.deathDialogShown = false;
       uiState.victoryDialogShown = false;
       overlay.remove();
