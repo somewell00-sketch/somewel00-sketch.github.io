@@ -852,7 +852,132 @@ function renderGame(){
     setTimeout(remove, Math.max(500, Number(ttl) || 5000));
   }
 
+  // --- Minimal, surgical: extra toast feedback for player damage events ---
+  // Uses the existing toast infrastructure (pushToast/toastHost). No game logic changes.
+  function __evtStr(v){ return (v === null || v === undefined) ? "" : String(v); }
+
+  function __evtFirstNonEmpty(...vals){
+    for(const v of vals){
+      const s = __evtStr(v).trim();
+      if(s) return s;
+    }
+    return "";
+  }
+
+  function __evtNpcNameFromIdOrName(v){
+    const s = __evtStr(v).trim();
+    if(!s) return "";
+    if(s === "player") return "You";
+    const n = world?.entities?.npcs?.[s];
+    return n?.name || s;
+  }
+
+  function __evtCreatureName(e){
+    // Priority order requested (when applicable).
+    return __evtFirstNonEmpty(
+      e?.creatureName,
+      e?.creature,
+      e?.name,
+      e?.sourceName,
+      e?.threatName
+    );
+  }
+
+  function __evtAttackerName(e){
+    // Priority order requested (when applicable).
+    const raw = __evtFirstNonEmpty(
+      e?.attackerName,
+      e?.whoName,
+      e?.who,
+      e?.byName,
+      e?.by
+    );
+    return __evtNpcNameFromIdOrName(raw);
+  }
+
+  function __evtWeaponPart(e){
+    const w = __evtFirstNonEmpty(e?.weaponName, e?.weapon, e?.itemName);
+    return w ? ` with ${w}` : "";
+  }
+
+  function __evtAffectsPlayer(e){
+    if(!e) return false;
+    const who = e.who ?? null;
+    const target = e.target ?? e.targetId ?? null;
+    if(who === "player") return true;
+    if(target === "player") return true;
+    // Some event shapes use explicit flags.
+    if(e.isPlayer === true) return true;
+    if(e.targetIsPlayer === true) return true;
+    return false;
+  }
+
+  function __evtPlayerDamageToastLine(e){
+    if(!__evtAffectsPlayer(e)) return "";
+
+    // Only add lines for damage events that currently lack clear player-facing feedback.
+    // (Other damage events already have messaging via formatEvents.)
+    switch(e.type){
+      case "THREAT": {
+        const k = __evtFirstNonEmpty(e.kind, e.threatKind);
+        if(k === "creature"){
+          const creature = __evtCreatureName(e) || "A creature";
+          return `${creature} attacked you.`;
+        }
+        if(k === "hazard") return "A biome hazard injured you.";
+        const creature = __evtCreatureName(e);
+        if(creature) return `${creature} attacked you.`;
+        return "Something in the area injured you.";
+      }
+      case "ATTACK": {
+        // NPC attacking player.
+        const target = e.target ?? e.targetId ?? null;
+        if(target !== "player") return "";
+        if(e.ok === false) return "";
+        const attacker = __evtAttackerName(e) || "An enemy";
+        return `${attacker} attacked you${__evtWeaponPart(e)}.`;
+      }
+      case "SPLASH_DAMAGE": {
+        const src = __evtAttackerName(e) || __evtFirstNonEmpty(e?.sourceName, e?.source);
+        const srcName = __evtNpcNameFromIdOrName(src);
+        if(srcName) return `You were caught in ${srcName}'s blast.`;
+        return "You were caught in a blast.";
+      }
+      case "MINE_HIT": {
+        return "You triggered a hidden trap.";
+      }
+      case "POISON_TICK": {
+        // Already covered in formatEvents, but keep the requested short feedback without duplicating.
+        return "";
+      }
+      case "SELF_DAMAGE": {
+        // Already covered in formatEvents.
+        return "";
+      }
+      case "CREATURE_ATTACK": {
+        // Already covered in formatEvents.
+        return "";
+      }
+      case "DAMAGE_RECEIVED": {
+        // Already covered in formatEvents.
+        return "";
+      }
+      default: {
+        // Fallback for other damage-like events we can detect.
+        const dmg = (e.dmg ?? e.damage ?? e.amount ?? null);
+        if(dmg !== null && dmg !== undefined && Number(dmg) > 0) return "You were injured.";
+        return "";
+      }
+    }
+  }
+
   function toastEvents(events, { limit=6 } = {}){
+    // Extra: ensure player damage always yields a visible toast (10s) when applicable.
+    // This is additive and does not alter the existing event formatting/flow.
+    for(const e of (events || [])){
+      const line = __evtPlayerDamageToastLine(e);
+      if(line) pushToast(line, { kind:"event", ttl: 10000 });
+    }
     const lines = formatEvents(events).filter(Boolean);
     if(!lines.length) return;
     const chunks = [];
