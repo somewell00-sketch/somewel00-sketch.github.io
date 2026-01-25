@@ -926,24 +926,49 @@ function renderGame(){
     const weaponEq = p.inventory?.equipped?.weaponDefId;
     const defEq = p.inventory?.equipped?.defenseDefId;
 
-    // Equipped slots
-    function renderSlot(el, defId, emptyLabel){
+    // Equipped slots (render as pills, even when empty)
+    function renderEquipSlot(el, defId, kind){
       if(!el) return;
       if(!defId){
-        el.innerHTML = `<div class="muted small">${escapeHtml(emptyLabel)}</div>`;
+        const label = (kind === "weapon") ? "Attack Slot" : "Defense Slot";
+        el.innerHTML = `<button class="itemPill emptySlot slotEquip" disabled aria-disabled="true" data-kind="${escapeHtml(kind)}" data-tooltip="Empty ${escapeHtml(label)}">
+          <span class="pillIcon" aria-hidden="true">＋</span>
+          <span class="pillName">${escapeHtml(label)}</span>
+        </button>`;
         return;
       }
+
       const def = getItemDef(defId);
       const icon = getItemIcon(defId);
       const name = def?.name || defId;
       const tip = def ? def.description : "";
-      el.innerHTML = `<div class="slotPill" data-tooltip="${escapeHtml(tip)}">
+      // Click equipped slot to unequip.
+      el.innerHTML = `<button class="itemPill slotEquip" data-kind="${escapeHtml(kind)}" data-tooltip="${escapeHtml(tip || "Click to unequip")}">
         <span class="pillIcon" aria-hidden="true">${escapeHtml(icon)}</span>
         <span class="pillName">${escapeHtml(name)}</span>
-      </div>`;
+        <span class="pillSub">(equipped)</span>
+      </button>`;
     }
-    renderSlot(attackSlotEl, weaponEq, "No attack item equipped");
-    renderSlot(defenseSlotEl, defEq, "No defense item equipped");
+    renderEquipSlot(attackSlotEl, weaponEq, "weapon");
+    renderEquipSlot(defenseSlotEl, defEq, "defense");
+
+    // Slot interactions (unequip)
+    attackSlotEl?.querySelectorAll(".slotEquip:not(.emptySlot)").forEach(btn => {
+      btn.onclick = () => {
+        if(p.inventory?.equipped) p.inventory.equipped.weaponDefId = null;
+        saveToLocal(world);
+        renderInventory();
+        pushToast("Attack slot cleared.");
+      };
+    });
+    defenseSlotEl?.querySelectorAll(".slotEquip:not(.emptySlot)").forEach(btn => {
+      btn.onclick = () => {
+        if(p.inventory?.equipped) p.inventory.equipped.defenseDefId = null;
+        saveToLocal(world);
+        renderInventory();
+        pushToast("Defense slot cleared.");
+      };
+    });
 
     // Render fixed inventory slots (video-game style): always show INVENTORY_LIMIT pills.
     // Filled pills map 1:1 to items[] indices; remaining slots are empty placeholders.
