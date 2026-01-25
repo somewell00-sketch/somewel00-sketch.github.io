@@ -496,9 +496,9 @@ function renderGame(){
         </div>
 
         <div class="section" style="margin-top:12px;">
-          <div class="muted">Attack item</div>
+          <div><strong>Attack item</strong></div>
           <div id="attackSlot" class="slotRow" style="margin-top:8px;"></div>
-          <div class="muted" style="margin-top:10px;">Defense item</div>
+          <div style="margin-top:10px;"><strong>Defense item</strong></div>
           <div id="defenseSlot" class="slotRow" style="margin-top:8px;"></div>
           <div class="muted small" style="margin-top:10px;">Click a weapon to equip it for attacks. Click a Shield to equip it for defense.</div>
         </div>
