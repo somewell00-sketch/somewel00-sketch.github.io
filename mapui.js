@@ -12,7 +12,7 @@ import { BIOME_PT, PALETTES, BIOME_BG } from "./mapgen.js";
 // ------------------------------------------------------------
 const USE_SELECTED_AREA_TEXTURE = true;
 const SELECTED_AREA_TEXTURE_ALPHA = 0.28;
-const BIOME_TEXTURE_PATH = (key) => `bg/${key}.jpeg`;
+const BIOME_TEXTURE_PATH = (key) => `bg/${key}.png`;
 
 const _biomeTextureCache = Object.create(null);
 function _getBiomeTexture(key){
