@@ -547,6 +547,7 @@ const DISTRICT_NAMES = {
       "Lume",
       "Noa",
       "Eron",
+      "Katniss",
       "Kali"
     ],
     last: [
@@ -568,6 +569,7 @@ const DISTRICT_NAMES = {
       "Cavo",
       "Nira",
       "Vesh",
+      "Everdeen",
       "Kalo",
       "Drim"
     ]
