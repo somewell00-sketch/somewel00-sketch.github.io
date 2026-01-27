@@ -529,8 +529,6 @@ function decideMove(world, npc, obs, traits, { seed, day, aiPhase, phaseProfile 
   const max = maxStepsForNpc(npc);
   if(max <= 0) return { source: npc.id, type: "STAY", payload: {} };
 
-  
-  const lowFp = (npc.fp ?? 0) <= 20;
   const currentArea = world.map?.areasById?.[String(npc.areaId)];
   const inCornucopia = Number(currentArea?.id) === 1;
   const invCountNow = inventoryCount(npc.inventory);
@@ -538,7 +536,6 @@ function decideMove(world, npc, obs, traits, { seed, day, aiPhase, phaseProfile 
 
   // FP recovery rule:
   // If FP drops below 30, the NPC prioritizes returning to the Cornucopia (Area 1).
-  // This produces more believable "refuel" behavior without exposing mechanics to the player.
   if(!inCornucopia && (npc.fp ?? 0) < 30){
     const routeToCorn = shortestRoute(world, Number(npc.areaId), 1, max, { day });
     if(routeToCorn && routeToCorn.length){
@@ -548,39 +545,42 @@ function decideMove(world, npc, obs, traits, { seed, day, aiPhase, phaseProfile 
 
   const visitedSet = new Set(Array.isArray(npc.memory?.visited) ? npc.memory.visited : []);
 
-  // Cornucopia exit rule:
-  // - If the NPC already has at least 1 item OR is planning to collect today, they leave.
-  // - If they fail to secure a weapon after 2 tries, they may also give up and leave.
-  // - If there are no items left or inventory is full, they can leave.
+  // Cornucopia exit rule + Day 1 linger (10% per NPC)
   let forceLeaveCorn = false;
   if(inCornucopia){
     npc.memory = npc.memory || {};
     if(npc.memory.cornCollectTries == null) npc.memory.cornCollectTries = 0;
     if(npc.memory.cornHasWeapon == null) npc.memory.cornHasWeapon = false;
+
     if(!npc.memory.cornHasWeapon){
       const w = strongestWeaponInInventory(npc.inventory);
       if(w) npc.memory.cornHasWeapon = true;
     }
+
     const hereGround = Array.isArray(currentArea?.groundItems) ? currentArea.groundItems : [];
     const invFull = invCountNow >= INVENTORY_LIMIT;
     const noItemsLeft = hereGround.length === 0;
     const triedTwiceNoWeapon = (npc.memory.cornCollectTries >= 2) && !npc.memory.cornHasWeapon;
     const gotAnyOrWillGet = (invCountNow >= 1) || !!npc?.memory?._plannedCornCollect;
     const canLeaveCorn = gotAnyOrWillGet || triedTwiceNoWeapon || noItemsLeft || invFull;
+
+    // If not allowed to leave yet, they must stay (keep scrambling for items).
     if(!canLeaveCorn) return { source: npc.id, type: "STAY", payload: { reason: "corn_locked" } };
 
-    // Day 1 linger: 20% chance to stay in the Cornucopia for one more day before dispersing.
-    // Deterministic per NPC/day so it doesn't oscillate within the same simulation tick.
+    // Day 1 linger: 10% chance to stay so they can still be in Cornucopia on Day 2.
+    // Deterministic per NPC/day (seed+day+npc.id).
     if(Number(day) === 1){
       const lingerR = hash01(seed, day, `corn_linger|${npc.id}`);
-      if(lingerR < 0.20){
+      if(lingerR < 0.10){
         return { source: npc.id, type: "STAY", payload: { reason: "corn_day2_linger" } };
       }
     }
+
+    // Otherwise, once they're allowed to leave, they should disperse.
     forceLeaveCorn = true;
   }
 
-  // BFS up to 3 steps, but we score only known areas well. Unknown areas get conservative estimates.
+  // BFS up to max steps to build candidates
   const start = Number(npc.areaId);
   const q = [{ id: start, steps: 0, route: [] }];
   const seen = new Set([start]);
@@ -590,24 +590,29 @@ function decideMove(world, npc, obs, traits, { seed, day, aiPhase, phaseProfile 
     const cur = q.shift();
     if(cur.steps > 0) candidates.push(cur);
     if(cur.steps >= max) continue;
+
     const adj = world.map?.adjById?.[String(cur.id)] || [];
     for(const nxt of adj){
       const nid = Number(nxt);
       if(seen.has(nid)) continue;
       seen.add(nid);
+
       const a = world.map?.areasById?.[String(nid)];
       if(!a || a.isActive === false) continue;
+
       // Movement constraints: skip impassable water areas.
       if(a.hasWater && !a.hasBridge) continue;
+
       // Avoid areas that will vanish tomorrow.
       const willCloseTomorrow = (a.willCloseOnDay != null) && (Number(a.willCloseOnDay) === day + 1);
       if(willCloseTomorrow) continue;
+
       q.push({ id: nid, steps: cur.steps + 1, route: [...cur.route, nid] });
     }
   }
 
   // Evaluate stay + destinations.
-  const scored = [{ id: start, steps: 0, route: [], isStay: true } , ...candidates]
+  const scored = [{ id: start, steps: 0, route: [], isStay: true }, ...candidates]
     .map(c => ({
       ...c,
       score: scoreArea(world, npc, c.id, c.steps, traits, visitedSet, { seed, day })
@@ -615,45 +620,47 @@ function decideMove(world, npc, obs, traits, { seed, day, aiPhase, phaseProfile 
     .sort((a,b)=>b.score-a.score);
 
   const stayScore = scored.find(s => s.isStay)?.score ?? -1e9;
-  const bestScore = scored[0]?.score ?? stayScore;
 
+  // Movement bias / thresholding
+  const invCount = invCountNow;
+  let stayBias = 0;
+  if(invCount >= 2) stayBias = -0.12;
+  const adjustedStayScore = stayScore + stayBias;
 
-// Movement bias:
-// - If the current area has no loot, strongly encourage moving.
-// - Outside of that, don't move unless a destination is noticeably better.
-const invCount = invCountNow;
-let stayBias = 0;
-if(invCount >= 2) stayBias = -0.12;
-const adjustedStayScore = stayScore + stayBias;
+  const here = world.map?.areasById?.[String(start)];
+  const hereGround = Array.isArray(here?.groundItems) ? here.groundItems : [];
+  const emptyHere = hereGround.length === 0;
 
-const here = world.map?.areasById?.[String(start)];
-const hereGround = Array.isArray(here?.groundItems) ? here.groundItems : [];
-const emptyHere = hereGround.length === 0;
+  // Force movement:
+  const forceMove = emptyHere || wantsFlee || forceLeaveCorn;
 
-// Force movement in a few cases:
-// - area is empty (no reason to camp)
-// - NPC is fleeing
-// - Cornucopia-specific gate says they must leave immediately once allowed
-const forceMove = emptyHere || wantsFlee || forceLeaveCorn;
+  const moveThreshold =
+    (0.14 + traits.caution * 0.10) +
+    (invCount === 0 && Number(start) === 1 ? 0.06 : 0) -
+    (invCount >= 2 ? 0.06 : 0);
 
-const moveThreshold = (0.14 + traits.caution * 0.10) + (invCount === 0 && Number(start) === 1 ? 0.06 : 0) - (invCount >= 2 ? 0.06 : 0);
-  const canMove = forceLeaveCorn || forceMove || scored.some(s => !s.isStay && (s.score - adjustedStayScore) >= moveThreshold);
+  const canMove =
+    forceLeaveCorn ||
+    forceMove ||
+    scored.some(s => !s.isStay && (s.score - adjustedStayScore) >= moveThreshold);
+
   if(!canMove) return { source: npc.id, type: "STAY", payload: {} };
 
   // Deterministic weighted choice among the top few candidates.
-  // More cautious NPCs behave more deterministically (lower temperature).
-  // Movement randomness is phase-dependent: chaos => more exploration, strategic => more deterministic.
   const prof = phaseProfile || { randomness: 0.25 };
   const temperature = (0.38 + prof.randomness * 0.35) - traits.caution * 0.22; // ~0.20..0.75
-  // If we are forcing a Cornucopia exit, prefer a simple 1-step route (clean dispersal).
+
+  // If forcing Cornucopia exit, prefer 1-step dispersal.
   const poolBase = scored.filter(s => !s.isStay);
   const pool1 = forceLeaveCorn ? poolBase.filter(s => s.steps === 1) : poolBase;
   const pool = (pool1.length ? pool1 : poolBase).slice(0, 6);
+
   const pickR = hash01(seed, day, `move_pick|${npc.id}`);
   const chosen = weightedPick(pool, pickR, temperature) || pool[0];
 
   return { source: npc.id, type: "MOVE", payload: { route: chosen.route } };
 }
+
 
 function shortestRoute(world, startId, goalId, maxSteps, { day }){
   const start = Number(startId);
