@@ -652,8 +652,8 @@ function decideMove(world, npc, obs, traits, { seed, day, aiPhase, phaseProfile 
 
   // If forcing Cornucopia exit, prefer 1-step dispersal.
   const poolBase = scored.filter(s => !s.isStay);
-  const pool1 = forceLeaveCorn ? poolBase.filter(s => s.steps === 1) : poolBase;
-  const pool = (pool1.length ? pool1 : poolBase).slice(0, 6);
+  const pool1 = forceLeaveCorn ? poolBase.filter(s => s.steps === 3) : poolBase;
+  const pool = (pool1.length ? pool1 : poolBase).slice(0, 10);
 
   const pickR = hash01(seed, day, `move_pick|${npc.id}`);
   const chosen = weightedPick(pool, pickR, temperature) || pool[0];
