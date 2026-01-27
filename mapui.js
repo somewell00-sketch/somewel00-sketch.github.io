@@ -1,5 +1,30 @@
 import { BIOME_PT, PALETTES, BIOME_BG } from "./mapgen.js";
 
+// --- Area texture overlay (image + color) ---
+// Toggle this to enable/disable the texture overlay.
+const USE_AREA_TEXTURE = true;
+// "cornucopia" = only area id=1, "all" = every visited area.
+const AREA_TEXTURE_APPLY = "all";
+// Overlay image URL (drawn with global alpha over the base area color).
+const AREA_TEXTURE_URL = "https://i.imgur.com/NcvFbYE.jpeg";
+// Strength of the overlay (0..1). This is multiplied by any area fade (e.g., closed zones).
+const AREA_TEXTURE_ALPHA = 0.25;
+
+const _areaOverlayImage = new Image();
+_areaOverlayImage.src = AREA_TEXTURE_URL;
+
+function polyBounds(poly){
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for(const [x,y] of poly){
+    if(x < minX) minX = x;
+    if(y < minY) minY = y;
+    if(x > maxX) maxX = x;
+    if(y > maxY) maxY = y;
+  }
+  return { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+}
+
+
 function rgbaFromHex(hex, a){
   const h = hex.replace("#","");
   const r = parseInt(h.slice(0,2), 16);
@@ -715,6 +740,23 @@ export class MapUI {
       }
       drawPath(ctx, c.poly);
       ctx.fill();
+
+      // Optional texture overlay (image on top of the base color).
+      if (USE_AREA_TEXTURE && _areaOverlayImage.complete && _areaOverlayImage.naturalWidth > 0){
+        const applyAll = (AREA_TEXTURE_APPLY === "all");
+        const applyCorn = (AREA_TEXTURE_APPLY === "cornucopia" && c.id === 1);
+        if (applyAll || applyCorn){
+          const b = polyBounds(c.poly);
+          // Respect any current fade (e.g., closed areas) by multiplying alpha.
+          const fade = (isClosed ? 0.10 : 1.00);
+          ctx.save();
+          ctx.globalAlpha = fade * AREA_TEXTURE_ALPHA;
+          drawPath(ctx, c.poly);
+          ctx.clip();
+          ctx.drawImage(_areaOverlayImage, b.x, b.y, b.w, b.h);
+          ctx.restore();
+        }
+      }
       ctx.restore();
 
       if (isWarning){
