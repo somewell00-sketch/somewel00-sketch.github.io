@@ -388,20 +388,20 @@ function renumberCellsByBFS(cells, adj){
 
 // --- Paletas + nomes PT (UI usa) ---
 export const BIOME_PT = {
-  glacier: "Geleira",
+  glacier: "Glacier",
   tundra: "Tundra",
-  mountain: "Montanha",
-  desert: "Deserto",
+  mountain: "Mountain",
+  desert: "Desert",
   caatinga: "Caatinga",
-  savanna: "Savana",
-  plains: "Planície",
-  woods: "Bosque",
-  forest: "Floresta",
-  jungle: "Selva",
-  fairy: "Bosque Fada",
-  swamp: "Pântano",
-  lake: "Lago",
-  industrial: "Área Industrial"
+  savanna: "Savanna",
+  plains: "Plains",
+  woods: "Woods",
+  forest: "Forest",
+  jungle: "Jungle",
+  fairy: "Fairy Woods",
+  swamp: "Swamp",
+  lake: "Lake",
+  industrial: "Industrial Zone"
 };
 
 export const PALETTES = [
