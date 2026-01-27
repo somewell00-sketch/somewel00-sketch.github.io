@@ -843,20 +843,20 @@ function renderGame(){
 
   const toastHost = document.getElementById("toastHost");
 
-  function pushToast(content, { kind="info", ttl=5000, meta=null } = {}){
-    if(!toastHost) return;
-    const el = document.createElement("div");
-    el.className = `toast ${kind}`;
+  function pushToast(content, { kind="info", ttl=5000, meta=null, silent=false } = {}){
+    if(!toastHost && !silent) return;
+    const el = silent ? null : document.createElement("div");
+    if(el) el.className = `toast ${kind}`;
 
     // Capture a plain-text representation for the toast log (UI-only).
     let toastText = "";
     if(Array.isArray(content)){
       const lines = content.map(line => String(line));
       toastText = lines.join("\n");
-      el.innerHTML = lines.map(line => `<div class="toastLine">${escapeHtml(String(line))}</div>`).join("");
+      if(el) el.innerHTML = lines.map(line => `<div class="toastLine">${escapeHtml(String(line))}</div>`).join("");
     } else {
       toastText = String(content ?? "");
-      el.textContent = toastText;
+      if(el) el.textContent = toastText;
     }
 
     // Keep an in-memory log of what was shown via toasts, for death/victory recaps.
@@ -873,15 +873,16 @@ function renderGame(){
       if(toastLog.length > 500) toastLog.splice(0, toastLog.length - 500);
     } catch(_e) {}
 
-    toastHost.appendChild(el);
+    if(el) toastHost.appendChild(el);
 
     const remove = () => {
+      if(!el) return;
       if(!el.parentNode) return;
       el.classList.add("out");
       setTimeout(() => { el.remove(); }, 200);
     };
 
-    el.addEventListener("click", remove);
+    if(el) el.addEventListener("click", remove);
     setTimeout(remove, Math.max(500, Number(ttl) || 5000));
   }
 
@@ -1012,12 +1013,79 @@ function renderGame(){
     }
   }
 
+  function __evtDamageAmount(e){
+    const v = (e?.dmg ?? e?.damage ?? e?.amount ?? e?.dmgDealt ?? null);
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function __evtPlayerDamageContextLine(e){
+    if(!__evtAffectsPlayer(e)) return "";
+    const dmg = __evtDamageAmount(e);
+    const dmgPart = (dmg !== null && dmg > 0) ? ` (${dmg} damage)` : "";
+
+    switch(e?.type){
+      case "ATTACK": {
+        const target = e.target ?? e.targetId ?? null;
+        if(target !== "player") return "";
+        const attacker = __evtAttackerName(e) || __evtNpcNameFromIdOrName(e?.who) || "An enemy";
+        return `${attacker} attacked you${__evtWeaponPart(e)}${dmgPart}.`;
+      }
+      case "DAMAGE_RECEIVED": {
+        const from = (e?.from === "environment") ? "the environment" : (__evtNpcNameFromIdOrName(e?.from) || "an attacker");
+        return `You took damage from ${from}${dmgPart}.`;
+      }
+      case "THREAT": {
+        const k = __evtFirstNonEmpty(e.kind, e.threatKind);
+        if(k === "creature"){
+          const creature = __evtCreatureName(e) || "a creature";
+          return `You were attacked by ${creature}${dmgPart}.`;
+        }
+        if(k === "hazard") return `A biome hazard injured you${dmgPart}.`;
+        const creature = __evtCreatureName(e);
+        if(creature) return `You were hurt by ${creature}${dmgPart}.`;
+        return `Something in the area injured you${dmgPart}.`;
+      }
+      case "CREATURE_ATTACK": {
+        const creature = __evtCreatureName(e) || e?.creature || "a creature";
+        return `You were attacked by ${creature}${dmgPart}.`;
+      }
+      case "MINE_HIT": return `You triggered a hidden trap${dmgPart}.`;
+      case "SPLASH_DAMAGE": {
+        const src = __evtNpcNameFromIdOrName(e?.by) || __evtAttackerName(e);
+        if(src) return `You were caught in ${src}'s blast${dmgPart}.`;
+        return `You were caught in a blast${dmgPart}.`;
+      }
+      case "HOSTILE_EVENT": return `Hostile activity injured you${dmgPart}.`;
+      case "LASER": return `A targeting beam hit you${dmgPart}.`;
+      case "MONSTER_AOE": {
+        const icon = e.monsterIcon ? `${e.monsterIcon} ` : "";
+        const verb = e.verb || "hits";
+        return `${icon}${e.monsterName || "A monster"} ${verb} you${dmgPart}.`;
+      }
+      case "SELF_DAMAGE": return `You hurt yourself${dmgPart}.`;
+      case "POISON_TICK": return `Poison harms you${dmgPart}.`;
+      default: {
+        if(dmg !== null && dmg > 0) return `You were injured${dmgPart}.`;
+        return "";
+      }
+    }
+  }
+
+
   function toastEvents(events, { limit=6 } = {}){
     // Extra: ensure player damage always yields a visible toast (10s) when applicable.
     // This is additive and does not alter the existing event formatting/flow.
     for(const e of (events || [])){
       const line = __evtPlayerDamageToastLine(e);
       if(line) pushToast(line, { kind:"event", ttl: 10000, meta: { damageToPlayer: true, eventType: e?.type || "" } });
+
+      // UI-only: also record a best-effort damage context entry for recaps/cause-of-death.
+      const ctx = __evtPlayerDamageContextLine(e);
+      if(ctx){
+        const dmg = __evtDamageAmount(e);
+        pushToast(ctx, { kind:"event", ttl: 0, silent: true, meta: { damageToPlayer: true, eventType: e?.type || "", dmg } });
+      }
     }
     const lines = formatEvents(events).filter(Boolean);
     if(!lines.length) return;
@@ -2047,6 +2115,13 @@ function renderGame(){
           break;
         }
         case "ATTACK": {
+          // NPC attacking the player (sim-generated attack events)
+          if(e.target === "player" && e.who && e.who !== "player" && Number(e.dmg || 0) > 0){
+            const wDef = e.weaponDefId ? getItemDef(e.weaponDefId) : null;
+            const weap = wDef?.name ? ` with ${wDef.name}` : "";
+            out.push(`${npcName(e.who)} attacked you${weap} for ${e.dmg} damage.`);
+            break;
+          }
           if(e.ok){
             const weap = e.weapon ? ` with ${e.weapon}` : "";
             if(e.dmgDealt === 0) out.push(`You attacked ${npcName(e.target)}${weap}, but it was blocked.`);
@@ -2183,6 +2258,49 @@ function renderGame(){
         }
         case "SELF_DAMAGE": {
           out.push(`You were hurt by your own ${e.weapon} (${e.dmg} damage).`);
+          break;
+        }
+        case "SPLASH_DAMAGE": {
+          if(e.who === "player"){
+            const wDef = e.weaponDefId ? getItemDef(e.weaponDefId) : null;
+            const weap = wDef?.name ? ` (${wDef.name})` : "";
+            out.push(`You were caught in ${npcName(e.by)}'s blast${weap} for ${e.dmg} damage.`);
+          }
+          break;
+        }
+        case "MINE_HIT": {
+          if(e.who === "player") out.push(`You triggered a hidden mine (${e.dmg} damage).`);
+          break;
+        }
+        case "HOSTILE_EVENT": {
+          if(e.who === "player") out.push(`Hostile activity injured you (${e.dmg} damage).`);
+          break;
+        }
+        case "LASER": {
+          if(e.who === "player"){
+            const txt = e.text ? ` ${e.text}` : "";
+            out.push(`A targeting beam hit you for ${e.dmg} damage.${txt}`);
+          }
+          break;
+        }
+        case "MONSTER_AOE": {
+          if(e.who === "player"){
+            const icon = e.monsterIcon ? `${e.monsterIcon} ` : "";
+            const verb = e.verb || "hits";
+            out.push(`${icon}${e.monsterName || "A monster"} ${verb} you for ${e.dmg} damage.`);
+          }
+          break;
+        }
+        case "CREATURE_ATTACK": {
+          if(e.who === "player") out.push(`You were attacked by ${e.creature} for ${e.dmg} damage.`);
+          break;
+        }
+        case "THREAT": {
+          if(e.target === "player"){
+            if(e.kind === "creature") out.push(`You were attacked by ${e.creature} for ${e.dmg} damage.`);
+            else if(e.kind === "hazard") out.push(`A biome hazard injured you for ${e.dmg} damage.`);
+            else out.push(`Something in the area injured you (${e.dmg} damage).`);
+          }
           break;
         }
         case "POISON_APPLIED": {
