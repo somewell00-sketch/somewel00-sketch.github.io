@@ -12,7 +12,7 @@ import { BIOME_PT, PALETTES, BIOME_BG } from "./mapgen.js";
 // ------------------------------------------------------------
 const USE_SELECTED_AREA_TEXTURE = true;
 const SELECTED_AREA_TEXTURE_ALPHA = 0.28;
-const BIOME_TEXTURE_PATH = (key) => `bg/${key}.png`;
+const BIOME_TEXTURE_PATH = (key) => `bg/${key}.jpeg`;
 
 const _biomeTextureCache = Object.create(null);
 function _getBiomeTexture(key){
@@ -714,7 +714,8 @@ export class MapUI {
 
     const visited = new Set(this.world.flags.visitedAreas);
     const currentId = this.world.entities.player.areaId;
-    const selectedId = (this.hoveredId != null) ? this.hoveredId : null;
+    const activeId = currentId;
+    const hoverId = (this.hoveredId != null) ? this.hoveredId : null;
 
     // Clear in canvas space.
     ctx.setTransform(1,0,0,1,0,0);
@@ -757,9 +758,10 @@ export class MapUI {
       drawPath(ctx, c.poly);
       ctx.fill();
 
-      // Selected biome texture overlay (like Cornucopia highlight):
-      // Only when the area is selected/hovered.
-      if(USE_SELECTED_AREA_TEXTURE && selectedId != null && c.id === selectedId && !isClosed){
+      // Biome texture overlay (image + base color):
+      // Shows on the ACTIVE area (player area) and also on HOVER (if any).
+      // If hover differs from active, both can show.
+      if(USE_SELECTED_AREA_TEXTURE && !isClosed && (c.id === activeId || (hoverId != null && c.id === hoverId))){
         const texKey = (c.id === 1) ? "cornucopia" : String(area.biome || "").toLowerCase();
         const img = _getBiomeTexture(texKey);
         if(img && img.complete && img.naturalWidth > 0){
