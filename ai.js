@@ -569,9 +569,9 @@ function decideMove(world, npc, obs, traits, { seed, day, aiPhase, phaseProfile 
     const canLeaveCorn = gotAnyOrWillGet || triedTwiceNoWeapon || noItemsLeft || invFull;
     if(!canLeaveCorn) return { source: npc.id, type: "STAY", payload: { reason: "corn_locked" } };
 
-    // Day 2 linger: 10% chance to stay in the Cornucopia for one more day before dispersing.
+    // Day 1 linger: 20% chance to stay in the Cornucopia for one more day before dispersing.
     // Deterministic per NPC/day so it doesn't oscillate within the same simulation tick.
-    if(Number(day) === 2){
+    if(Number(day) === 1){
       const lingerR = hash01(seed, day, `corn_linger|${npc.id}`);
       if(lingerR < 0.20){
         return { source: npc.id, type: "STAY", payload: { reason: "corn_day2_linger" } };
