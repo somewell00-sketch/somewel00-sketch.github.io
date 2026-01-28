@@ -166,7 +166,7 @@ const ARENA_NAME_BY_BIOME = {
 };
 
 const REGULAR_ARENA_NAME = "Survival Arena";
-const THEMATIC_ARENA_CHANCE = 0.20;
+const THEMATIC_ARENA_CHANCE = 0.70;
 
 // --- Area personality tags (hidden from UI) ---
 // Tags influence flavor text, light passive effects, and AI weights.
