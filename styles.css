@@ -141,7 +141,7 @@ a{ color: var(--accent); }
   border: 1px solid rgba(250,208,44,0.22);
   padding: 8px 10px;
   border-radius: 10px;
-  font-size: 15px;
+  font-size: 18px;
 }
 
 .input{
