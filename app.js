@@ -823,7 +823,7 @@ function renderGame(){
           <div style="padding: 8px" ;="">Possible Actions:</div>
             <div class="row" style="gap:8px; flex-wrap:wrap;">
             <button id="btnDefend" class="btn blue" style="flex:1; min-width:120px;">🛡️ Defend</button>
-            <button id="btnNothing" class="btn ghost" style="flex:1; min-width:120px;">Nothing</button>
+            <button id="btnNothing" class="btn ghost" style="flex:1; min-width:120px;">Do Nothing</button>
             <button id="btnDrink" class="btn teal hidden" style="flex:1; min-width:120px;" data-tooltip="Restore 10 FP by drinking water">💧 Drink water</button>
             <button id="btnSetNet" class="btn purple hidden" style="flex:1; min-width:120px;" data-tooltip="Set a Net trap here (activates tomorrow)">🕸️ Set Net</button>
             <button id="btnSetMine" class="btn orange hidden" style="flex:1; min-width:120px;" data-tooltip="Set a Mine trap here (activates tomorrow)">🧨 Set Mine</button>
