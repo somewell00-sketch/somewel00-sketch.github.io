@@ -63,7 +63,7 @@ try {
   root.innerHTML = `
     <div class="screen">
       <div class="card">
-        <div class="h1">Arena Simulator</div>
+        <div class="banner-hero h1">Battle Royale Simulator</div>
         <div class="alert">Failed to load item definitions (data/items.json). Please reload.</div>
       </div>
     </div>
