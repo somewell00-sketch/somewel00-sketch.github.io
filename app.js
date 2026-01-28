@@ -480,7 +480,7 @@ function renderStart(){
   root.innerHTML = `
     <div class="screen">
       <div class="card">
-        <div class="h1">Arena Simulator</div>
+        <div class="hero-banner h1">Arena Simulator</div>
         <div class="muted">You start at the Cornucopia (Area 1). Each day: first commit an action, then you can move (up to 3 adjacent areas) and finish with End Day.</div>
         <hr class="sep" />
 
