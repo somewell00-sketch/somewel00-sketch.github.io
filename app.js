@@ -822,13 +822,13 @@ function renderGame(){
           <div class="actionBar" id="needsActionBar">
           <div style="padding: 8px" ;="">Possible Actions:</div>
             <div class="row" style="gap:8px; flex-wrap:wrap;">
-            <button id="btnDefend" class="btn blue" style="flex:1; min-width:120px;">Defend</button>
+            <button id="btnDefend" class="btn blue" style="flex:1; min-width:120px;">🛡️ Defend</button>
             <button id="btnNothing" class="btn ghost" style="flex:1; min-width:120px;">Nothing</button>
-            <button id="btnDrink" class="btn teal hidden" style="flex:1; min-width:120px;" data-tooltip="Restore 10 FP by drinking water">Drink water</button>
-            <button id="btnSetNet" class="btn purple hidden" style="flex:1; min-width:120px;" data-tooltip="Set a Net trap here (activates tomorrow)">Set Net</button>
-            <button id="btnSetMine" class="btn orange hidden" style="flex:1; min-width:120px;" data-tooltip="Set a Mine trap here (activates tomorrow)">Set Mine</button>
-            <button id="btnAttack" class="btn red hidden" style="flex:1; min-width:120px;">Attack</button>
-            <button id="btnCollect" class="btn hidden" style="flex:1; min-width:120px;" data-tooltip="Pick up the selected item">Collect item</button>
+            <button id="btnDrink" class="btn teal hidden" style="flex:1; min-width:120px;" data-tooltip="Restore 10 FP by drinking water">💧 Drink water</button>
+            <button id="btnSetNet" class="btn purple hidden" style="flex:1; min-width:120px;" data-tooltip="Set a Net trap here (activates tomorrow)">🕸️ Set Net</button>
+            <button id="btnSetMine" class="btn orange hidden" style="flex:1; min-width:120px;" data-tooltip="Set a Mine trap here (activates tomorrow)">🧨 Set Mine</button>
+            <button id="btnAttack" class="btn red hidden" style="flex:1; min-width:120px;">⚔️ Attack</button>
+            <button id="btnCollect" class="btn hidden" style="flex:1; min-width:120px;" data-tooltip="Pick up the selected item">🫳 Collect item</button>
             </div>
             <div class="muted small" style="margin-top:8px;">Moves left today: <span id="movesLeft"></span></div>
           </div>
