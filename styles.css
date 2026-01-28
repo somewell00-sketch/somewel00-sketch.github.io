@@ -66,6 +66,16 @@ a{ color: var(--accent); }
   padding:18px;
   box-shadow: var(--shadow);
 }
+.banner {
+    font-size: 14px;
+    height: 240px;
+    color: rgba(240, 240, 242, 0.85);
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: url(bg/arena.png);
+    background-position: center;
+    background-repeat: no-repeat;
+    border: 1px solid rgba(250, 208, 44, 0.18);
 
 .panel{
   background: linear-gradient(180deg, rgba(70,31,24,0.85), rgba(17,17,19,0.92));
