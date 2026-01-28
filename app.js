@@ -731,11 +731,11 @@ function renderGame(){
 
         <div class="statBlock">
           <div class="statLine">
-            <div class="muted small">HP <span id="youHpText"></span></div>
+            <div class="muted small">❤️ HP <span id="youHpText"></span></div>
           </div>
           <div class="statBar"><div id="youHpBar" class="statFill"></div></div>
           <div class="statLine" style="margin-top:10px;">
-            <div class="muted small">FP <span id="youFpText"></span></div>
+            <div class="muted small">🍽️ FP <span id="youFpText"></span></div>
           </div>
           <div class="statBar"><div id="youFpBar" class="statFill"></div></div>
         </div>
