@@ -843,7 +843,8 @@ function renderGame(){
 
   const toastHost = document.getElementById("toastHost");
 
-  function pushToast(content, { kind="info", ttl=5000, meta=null, silent=false } = {}){
+  // Default toast TTL increased to 8s for readability.
+  function pushToast(content, { kind="info", ttl=8000, meta=null, silent=false } = {}){
     if(!toastHost && !silent) return;
     const el = silent ? null : document.createElement("div");
     if(el) el.className = `toast ${kind}`;
@@ -883,7 +884,7 @@ function renderGame(){
     };
 
     if(el) el.addEventListener("click", remove);
-    setTimeout(remove, Math.max(500, Number(ttl) || 5000));
+    setTimeout(remove, Math.max(500, Number(ttl) || 8000));
   }
 
   // --- Minimal, surgical: extra toast feedback for player damage events ---
@@ -1938,6 +1939,28 @@ function renderGame(){
     })();
     const causeText = (lastDamageToast?.text || "").trim() || "Unknown";
 
+    const ordinal = (n) => {
+      const v = Math.abs(Number(n) || 0);
+      const mod100 = v % 100;
+      if(mod100 >= 11 && mod100 <= 13) return `${v}th`;
+      switch(v % 10){
+        case 1: return `${v}st`;
+        case 2: return `${v}nd`;
+        case 3: return `${v}rd`;
+        default: return `${v}th`;
+      }
+    };
+
+    // UI-only: basic end-of-run stats.
+    const npcs = world?.entities?.npcs || {};
+    const ids = Object.keys(npcs);
+    const aliveNpcs = ids.filter(id => (npcs[id]?.alive !== false) && ((npcs[id]?.hp ?? 0) > 0)).length;
+    const placement = aliveNpcs + 1;
+    const dayNum = Number(world?.meta?.day ?? 0);
+    const kills = Number(player?.kills ?? 0);
+    const hpLeft = Math.max(0, Number(player?.hp ?? 0));
+    const fpLeft = Math.max(0, Number(player?.fp ?? 0));
+
     const overlay = document.createElement("div");
     overlay.className = "modalOverlay";
     overlay.innerHTML = `
@@ -1946,6 +1969,13 @@ function renderGame(){
         <div class="muted" style="margin-top:8px;">${msg}</div>
 
         <div class="muted small" style="margin-top:10px;"><strong>Cause:</strong> <span id="deathCause"></span></div>
+
+        <div class="section" style="margin-top:10px; padding:10px; border-radius:12px;">
+          <div class="muted small"><strong>Placement:</strong> <span id="statPlacement"></span></div>
+          <div class="muted small" style="margin-top:4px;"><strong>Day:</strong> <span id="statDay"></span></div>
+          <div class="muted small" style="margin-top:4px;"><strong>Kills:</strong> <span id="statKills"></span></div>
+          <div class="muted small" style="margin-top:4px;"><strong>Final HP / FP:</strong> <span id="statVitals"></span></div>
+        </div>
 
         <div class="row" style="margin-top:10px; justify-content:space-between; gap:8px; align-items:center;">
           <button id="toggleEventLog" class="btn">Show event log</button>
@@ -1965,6 +1995,15 @@ function renderGame(){
     try {
       const causeEl = overlay.querySelector("#deathCause");
       if(causeEl) causeEl.textContent = causeText;
+
+      const placementEl = overlay.querySelector("#statPlacement");
+      if(placementEl) placementEl.textContent = `${ordinal(placement)} place`;
+      const dayEl = overlay.querySelector("#statDay");
+      if(dayEl) dayEl.textContent = dayNum ? `Day ${dayNum}` : "Day 0";
+      const killsEl = overlay.querySelector("#statKills");
+      if(killsEl) killsEl.textContent = String(kills);
+      const vitalsEl = overlay.querySelector("#statVitals");
+      if(vitalsEl) vitalsEl.textContent = `${hpLeft} / ${fpLeft}`;
 
       const toggleBtn = overlay.querySelector("#toggleEventLog");
       const wrap = overlay.querySelector("#eventLogWrap");
@@ -2000,12 +2039,38 @@ function renderGame(){
     if(uiState.victoryDialogShown) return;
     uiState.victoryDialogShown = true;
 
+    const ordinal = (n) => {
+      const v = Math.abs(Number(n) || 0);
+      const mod100 = v % 100;
+      if(mod100 >= 11 && mod100 <= 13) return `${v}th`;
+      switch(v % 10){
+        case 1: return `${v}st`;
+        case 2: return `${v}nd`;
+        case 3: return `${v}rd`;
+        default: return `${v}th`;
+      }
+    };
+
+    // UI-only: basic end-of-run stats.
+    const player = world?.entities?.player;
+    const dayNum = Number(world?.meta?.day ?? 0);
+    const kills = Number(player?.kills ?? 0);
+    const hpLeft = Math.max(0, Number(player?.hp ?? 0));
+    const fpLeft = Math.max(0, Number(player?.fp ?? 0));
+
     const overlay = document.createElement("div");
     overlay.className = "modalOverlay";
     overlay.innerHTML = `
       <div class="modal">
         <div class="h1" style="margin:0;">Victory</div>
         <div class="muted" style="margin-top:8px;">Congratulations. You are the last tribute alive.</div>
+
+        <div class="section" style="margin-top:10px; padding:10px; border-radius:12px;">
+          <div class="muted small"><strong>Placement:</strong> <span id="statPlacement"></span></div>
+          <div class="muted small" style="margin-top:4px;"><strong>Day:</strong> <span id="statDay"></span></div>
+          <div class="muted small" style="margin-top:4px;"><strong>Kills:</strong> <span id="statKills"></span></div>
+          <div class="muted small" style="margin-top:4px;"><strong>Final HP / FP:</strong> <span id="statVitals"></span></div>
+        </div>
 
         <div class="row" style="margin-top:10px; justify-content:space-between; gap:8px; align-items:center;">
           <button id="toggleEventLog" class="btn">Show event log</button>
@@ -2023,6 +2088,15 @@ function renderGame(){
 
     // Fill log (UI-only, no gameplay impact).
     try {
+      const placementEl = overlay.querySelector("#statPlacement");
+      if(placementEl) placementEl.textContent = `${ordinal(1)} place`;
+      const dayEl = overlay.querySelector("#statDay");
+      if(dayEl) dayEl.textContent = dayNum ? `Day ${dayNum}` : "Day 0";
+      const killsEl = overlay.querySelector("#statKills");
+      if(killsEl) killsEl.textContent = String(kills);
+      const vitalsEl = overlay.querySelector("#statVitals");
+      if(vitalsEl) vitalsEl.textContent = `${hpLeft} / ${fpLeft}`;
+
       const toggleBtn = overlay.querySelector("#toggleEventLog");
       const wrap = overlay.querySelector("#eventLogWrap");
       const listEl = overlay.querySelector("#eventLogList");
