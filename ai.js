@@ -1,3 +1,4 @@
+const MAX_NPC_ACTIONS_PER_DAY = 2; // NPCs can perform up to 2 action intents per day
 import { getItemDef, ItemTypes, strongestWeaponInInventory, inventoryCount, INVENTORY_LIMIT } from "./items.js";
 
 // NPC AI (incremental, score-based):
