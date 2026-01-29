@@ -2022,6 +2022,85 @@ export function endDay(world, npcIntents = [], dayEvents = []){
   const npcAttacks = [];
   const npcDefends = new Set();
 
+
+  // Option C (low-impact): fast-use weapon pickup when COLLECT is the first planned action
+  // and the same NPC also ATTACKs this day. To avoid paradoxes without reordering phases,
+  // we only grant this when the pickup is uncontested (only one collector for that itemIndex in that area).
+  const fastPickupGranted = new Set();
+  try {
+    const firstActionByNpc = Object.create(null);
+    const hasAttackByNpc = new Set();
+    const collectCounts = new Map(); // "areaId|itemIndex" -> count
+
+    for(const act of (npcIntents || [])){
+      if(!act?.source) continue;
+
+      if(act.type === "ATTACK") hasAttackByNpc.add(act.source);
+
+      // First non-movement intent is considered the "first action".
+      if(act.type !== "MOVE" && act.type !== "STAY" && firstActionByNpc[act.source] == null){
+        firstActionByNpc[act.source] = act;
+      }
+
+      if(act.type === "COLLECT"){
+        const aId = String(startAreas?.[act.source] ?? actorById(next, act.source)?.areaId);
+        const idx = Number(act.payload?.itemIndex ?? 0);
+        const k = `${aId}|${idx}`;
+        collectCounts.set(k, (collectCounts.get(k) || 0) + 1);
+      }
+    }
+
+    for(const [who, act] of Object.entries(firstActionByNpc)){
+      if(act?.type !== "COLLECT") continue;
+      if(!hasAttackByNpc.has(who)) continue;
+
+      const areaId = String(startAreas?.[who] ?? actorById(next, who)?.areaId);
+      const itemIndex = Number(act.payload?.itemIndex ?? 0);
+      const k = `${areaId}|${itemIndex}`;
+
+      // Only uncontested pickups (so we don't let someone "use" a weapon they might lose).
+      if((collectCounts.get(k) || 0) !== 1) continue;
+
+      const area = next.map.areasById[areaId];
+      const item = area?.groundItems?.[itemIndex];
+      if(!item?.defId) continue;
+
+      const def = getItemDef(item.defId);
+      if(!def || def.type !== "weapon") continue;
+
+      const actor = actorById(next, who);
+      if(!actor || (actor.hp ?? 0) <= 0) continue;
+
+      // Pay the same FP cost a collect attempt would pay later.
+      const res = spendFp(actor, FP_COST.COLLECT);
+      events.push({ type:"FP_COST", who, kind:"COLLECT", spent: res.spent, fp: actor.fp, areaId: Number(areaId) });
+
+      // Remove from ground now and add to inventory.
+      area.groundItems.splice(itemIndex, 1);
+      actor.inventory = actor.inventory || { items: [], equipped: {} };
+      actor.inventory.items = Array.isArray(actor.inventory.items) ? actor.inventory.items : [];
+      actor.inventory.items.push({ defId: item.defId, usesLeft: item.usesLeft ?? null });
+
+      // Auto-equip if it's better than current equipped weapon.
+      const curId = actor.inventory?.equipped?.weaponDefId || null;
+      const curDef = curId ? getItemDef(curId) : null;
+      const curDmg = Number(curDef?.damage) || 0;
+      const newDmg = Number(def?.damage) || 0;
+
+      if(newDmg > curDmg){
+        actor.inventory.equipped = actor.inventory.equipped || {};
+        actor.inventory.equipped.weaponDefId = def.id;
+        events.push({ type:"AUTO_EQUIP", who, areaId: Number(areaId), weaponDefId: def.id, via:"fast_collect" });
+      } else {
+        events.push({ type:"PICKUP", who, areaId: Number(areaId), itemDefId: def.id, via:"fast_collect" });
+      }
+
+      fastPickupGranted.add(who);
+    }
+  } catch(e){
+    // Never break endDay because of this optional rule.
+  }
+
   for(const act of (npcIntents || [])){
     if(!act || !act.source) continue;
     const a = actorById(next, act.source);
