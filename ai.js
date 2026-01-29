@@ -2,7 +2,7 @@ import { getItemDef, ItemTypes, strongestWeaponInInventory, inventoryCount, INVE
 
 // NPC AI (incremental, score-based):
 // - builds a limited ObservedWorld per NPC
-// - chooses 1 posture intent (ATTACK/DEFEND/NOTHING/DRINK/COLLECT/SET_TRAP)
+// - chooses up to 2 action intents (ATTACK/DEFEND/NOTHING/DRINK/COLLECT/SET_TRAP)
 // - chooses 1 movement intent (MOVE/STAY)
 // Deterministic: all tiebreaks use hash(seed, day, actorId, salt).
 
@@ -44,8 +44,9 @@ export function generateNpcIntents(world){
     const traits = npc.memory.traits;
     const obs = buildObservedWorld(world, npc);
 
-    // --- Posture/action intent ---
-    const actionIntent = decidePosture(world, npc, obs, traits, {
+    // --- Action intents (up to 2, pre-movement) ---
+    const actionIntents = [];
+    const action1 = decidePosture(world, npc, obs, traits, {
       seed,
       day,
       playerDistrict,
@@ -53,18 +54,35 @@ export function generateNpcIntents(world){
       phaseProfile,
       reservedCollectByArea
     });
-    if(actionIntent) intents.push(actionIntent);
+    if(action1) actionIntents.push(action1);
 
-    // Reserve collected index to increase diversity.
-    if(actionIntent?.type === "COLLECT"){
-      const aId = String(npc.areaId);
-      const idx = Number(actionIntent?.payload?.itemIndex);
-      if(Number.isFinite(idx)){
-        reservedCollectByArea[aId] = reservedCollectByArea[aId] || {};
-        reservedCollectByArea[aId][idx] = (reservedCollectByArea[aId][idx] || 0) + 1;
+    if(actionIntents.length < MAX_NPC_ACTIONS_PER_DAY){
+      const action2 = decideSecondAction(world, npc, obs, traits, action1, {
+        seed,
+        day,
+        playerDistrict,
+        aiPhase,
+        phaseProfile,
+        reservedCollectByArea
+      });
+      if(action2) actionIntents.push(action2);
+    }
+
+    for(const act of actionIntents){
+      if(!act) continue;
+      intents.push(act);
+
+      // Reserve collected index to increase diversity (counts both actions).
+      if(act?.type === "COLLECT"){
+        const aId = String(npc.areaId);
+        const idx = Number(act?.payload?.itemIndex);
+        if(Number.isFinite(idx)){
+          reservedCollectByArea[aId] = reservedCollectByArea[aId] || {};
+          reservedCollectByArea[aId][idx] = (reservedCollectByArea[aId][idx] || 0) + 1;
+        }
+        // Mark for Cornucopia exit rule (leave after getting any item).
+        if(Number(obs?.area?.id) === 1) npc.memory._plannedCornCollect = true;
       }
-      // Mark for Cornucopia exit rule (leave after getting any item).
-      if(Number(obs?.area?.id) === 1) npc.memory._plannedCornCollect = true;
     }
 
     // --- Movement intent ---
@@ -521,6 +539,133 @@ let bestAttack = null;
   return (defendScore >= nothingScore)
     ? { source: npc.id, type: "DEFEND", payload: {} }
     : { source: npc.id, type: "NOTHING", payload: {} };
+}
+
+
+function decideSecondAction(world, npc, obs, traits, firstAction, { seed, day, aiPhase, phaseProfile, reservedCollectByArea }){
+  // Second action is a light-weight add-on. It intentionally avoids deep re-scoring,
+  // but enables combos like COLLECT + ATTACK or ATTACK + COLLECT.
+  if(!npc || (npc.hp ?? 0) <= 0) return null;
+  if((npc.trappedDays ?? 0) > 0) return null;
+
+  const firstType = String(firstAction?.type || "");
+  const area = obs?.area;
+  const ground = Array.isArray(area?.groundItems) ? area.groundItems : [];
+  const invN = inventoryCount(npc.inventory);
+
+  const hasTargets = Array.isArray(obs?.hereActors) && obs.hereActors.some(x => x?.entity && (x.entity.hp ?? 0) > 0 && x.entity.areaId === npc.areaId);
+  const canAttack = Number(npc.fp ?? 0) >= 10;
+  const prof = phaseProfile || { aggression: 1, randomness: 0.25 };
+
+  function pickAttackTargetId(){
+    const targets = (obs?.hereActors || [])
+      .filter(x => x && x.entity && (x.entity.hp ?? 0) > 0 && x.entity.areaId === npc.areaId)
+      .map(x => ({ id: x.entity.id, kind: x.kind, hp: Number(x.entity.hp ?? 100), kills: Number(x.entity.kills ?? 0) }));
+
+    if(!targets.length) return null;
+
+    // Prefer the player slightly, then weakest HP, then most kills, then deterministic jitter.
+    targets.sort((a,b)=>{
+      const ap = (a.id === "player") ? 1 : 0;
+      const bp = (b.id === "player") ? 1 : 0;
+      if(ap !== bp) return bp - ap;
+      if(a.hp !== b.hp) return a.hp - b.hp;
+      if(a.kills !== b.kills) return b.kills - a.kills;
+      const aj = hash01(seed, day, `atk2_jit|${npc.id}|${a.id}`);
+      const bj = hash01(seed, day, `atk2_jit|${npc.id}|${b.id}`);
+      return bj - aj;
+    });
+
+    return targets[0].id;
+  }
+
+  function pickCollectIndex(){
+    if(!ground.length) return -1;
+    if(invN >= INVENTORY_LIMIT) return -1;
+
+    const areaIdStr = String(area?.id ?? npc.areaId ?? "");
+    const reservedHere = reservedCollectByArea?.[areaIdStr] || {};
+
+    const scored = [];
+    for(let i=0;i<ground.length;i++){
+      const inst = ground[i];
+      const def = getItemDef(inst?.defId);
+      let v = itemValue(def, inst);
+
+      // Anti-collision penalty
+      const reservedCount = Number(reservedHere?.[i] ?? 0);
+      if(reservedCount > 0) v *= 1 / (1 + reservedCount * 1.25);
+
+      // Slight preference to grab something useful if we just fought.
+      if(firstType === "ATTACK"){
+        const isHeal = Number(def?.effects?.healHP ?? 0) > 0 || Number(def?.effects?.healFP ?? 0) > 0;
+        if(isHeal) v *= 1.15;
+      }
+
+      // Tiny deterministic jitter
+      v += hash01(seed, day, `collect2_jit|${npc.id}|${i}`) * 0.015;
+      scored.push({ idx: i, score: v });
+    }
+    scored.sort((a,b)=>b.score-a.score);
+    const topN = Math.min(10, scored.length);
+    const pool = scored.slice(0, topN);
+    const temp = 0.25 + (prof.randomness ?? 0) * 0.45 + traits.caution * 0.10;
+    const pick = weightedPick(pool, hash01(seed, day, `collect2_pick|${npc.id}|${areaIdStr}|${firstType}`), temp) || pool[0];
+    return Number(pick?.idx ?? -1);
+  }
+
+  // --- Simple combo rules ---
+  // 1) If we collected first, we may attack second (ambush after grabbing loot).
+  if(firstType === "COLLECT" && hasTargets && canAttack){
+    const p = (0.25 + traits.aggression * 0.55) * (prof.aggression ?? 1);
+    const r = hash01(seed, day, `npc_second_after_collect|${npc.id}`);
+    if(r < Math.min(0.85, p)){
+      const tid = pickAttackTargetId();
+      if(tid) return { source: npc.id, type: "ATTACK", payload: { targetId: tid } };
+    }
+  }
+
+  // 2) If we attacked first, we may collect second (loot goblin / scavenger).
+  if(firstType === "ATTACK" && ground.length && invN < INVENTORY_LIMIT){
+    const p = 0.18 + traits.greed * 0.62;
+    const r = hash01(seed, day, `npc_second_after_attack|${npc.id}`);
+    if(r < Math.min(0.90, p)){
+      const idx = pickCollectIndex();
+      if(idx >= 0) return { source: npc.id, type: "COLLECT", payload: { itemIndex: idx } };
+    }
+  }
+
+  // 3) If we defended first, we may still try to snatch an item.
+  if(firstType === "DEFEND" && ground.length && invN < INVENTORY_LIMIT){
+    const p = 0.12 + traits.greed * 0.48;
+    const r = hash01(seed, day, `npc_second_after_defend|${npc.id}`);
+    if(r < Math.min(0.80, p)){
+      const idx = pickCollectIndex();
+      if(idx >= 0) return { source: npc.id, type: "COLLECT", payload: { itemIndex: idx } };
+    }
+  }
+
+  // 4) If we drank first and are bold, we may attack second.
+  if(firstType === "DRINK" && hasTargets && canAttack){
+    const p = 0.15 + traits.aggression * 0.50;
+    const r = hash01(seed, day, `npc_second_after_drink|${npc.id}`);
+    if(r < Math.min(0.80, p)){
+      const tid = pickAttackTargetId();
+      if(tid) return { source: npc.id, type: "ATTACK", payload: { targetId: tid } };
+    }
+  }
+
+  // 5) Otherwise, occasionally do an opportunistic collect if there's loot.
+  if(firstType !== "COLLECT" && ground.length && invN < INVENTORY_LIMIT){
+    const r = hash01(seed, day, `npc_second_opportunistic_collect|${npc.id}`);
+    const p = 0.06 + traits.greed * 0.22 + (prof.randomness ?? 0) * 0.10;
+    if(r < Math.min(0.35, p)){
+      const idx = pickCollectIndex();
+      if(idx >= 0) return { source: npc.id, type: "COLLECT", payload: { itemIndex: idx } };
+    }
+  }
+
+  return null;
 }
 
 function decideMove(world, npc, obs, traits, { seed, day, aiPhase, phaseProfile }){

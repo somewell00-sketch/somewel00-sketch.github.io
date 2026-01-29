@@ -154,8 +154,7 @@ function recordAreaDeath({ areaId, whoId } = {}){
 
 const uiState = {
   focusedAreaId: 1,
-  phase: "needs_action", // needs_action | explore | trapped
-  actionsUsed: 0,
+  phase: "needs_action", // needs_action | explore
   movesUsed: 0,
   dayEvents: [],
   selectedTarget: null,
@@ -166,7 +165,6 @@ const uiState = {
 };
 
 const MAX_MOVES_PER_DAY = 3;
-const MAX_ACTIONS_PER_DAY = 2;
 
 // --- Tooltip helpers (single tooltip for the whole UI) ---
 function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
@@ -677,7 +675,6 @@ function renderStart(){
     toastLog = [];
     uiState.focusedAreaId = world.entities.player.areaId;
     uiState.phase = "needs_action";
-    uiState.actionsUsed = 0;
     uiState.movesUsed = 0;
     uiState.dayEvents = [];
     uiState.deathDialogShown = false;
@@ -792,7 +789,7 @@ function renderGame(){
         <canvas id="mini" width="200" height="200" class="minimap" aria-label="Minimap"></canvas>
         <div id="areaInfo" class="areaInfo">—</div>
         <div id="toastHost" class="toastHost" aria-live="polite" aria-relevant="additions"></div>
-        <div class="hint">Cornucopia is Area 1 • Select an area to inspect • Move only after committing 2 actions</div>
+        <div class="hint">Cornucopia is Area 1 • Select an area to inspect • Move only after committing an action</div>
       </main>
       <!-- RIGHT: gameplay (actions + entities in your current area) -->
       <aside class="panel" id="leftPanel">
@@ -811,7 +808,7 @@ function renderGame(){
 
         <div id="needsAction" class="section">
           <div class="banner">
-            You must perform 2 actions in this area before moving to the next one.
+            You must perform an action in this area before moving to the next one.
           </div>
 
           <div class="muted" style="margin-top:12px;">Players in the area</div>
@@ -833,8 +830,7 @@ function renderGame(){
             <button id="btnAttack" class="btn red hidden" style="flex:1; min-width:120px;">⚔️ Attack</button>
             <button id="btnCollect" class="btn hidden" style="flex:1; min-width:120px;" data-tooltip="Pick up the selected item">🫳 Collect item</button>
             </div>
-            <div class="muted small" style="margin-top:8px;">Actions left before moving: <span id="actionsLeft"></span></div>
-            <div class="muted small" style="margin-top:4px;">Moves left today: <span id="movesLeft"></span></div>
+            <div class="muted small" style="margin-top:8px;">Moves left today: <span id="movesLeft"></span></div>
           </div>
         </div>
 
@@ -879,7 +875,6 @@ function renderGame(){
   const exploreStateEl = document.getElementById("exploreState");
   const trappedStateEl = document.getElementById("trappedState");
   const trapDaysEl = document.getElementById("trapDays");
-  const actionsLeftEl = document.getElementById("actionsLeft");
   const movesLeftEl = document.getElementById("movesLeft");
   const movesLeftEl2 = document.getElementById("movesLeft2");
   const areaPillsEl = document.getElementById("areaPills");
@@ -1311,8 +1306,7 @@ function renderGame(){
 
     // Always allow inspecting focus. Movement only in explore.
     if(uiState.phase !== "explore"){
-      const left = Math.max(0, MAX_ACTIONS_PER_DAY - Number(uiState.actionsUsed || 0));
-      showLeftAlert(`You must commit ${left} more action${left===1?"":"s"} before moving.`);
+      showLeftAlert("You must commit an action before moving.");
       return;
     }
 
@@ -1359,7 +1353,6 @@ function renderGame(){
 
   function resetDayState(){
     uiState.phase = "needs_action";
-    uiState.actionsUsed = 0;
     uiState.movesUsed = 0;
     uiState.dayEvents = [];
     uiState.selectedTarget = null;
@@ -1717,9 +1710,6 @@ function renderGame(){
 
     const movesLeft = Math.max(0, MAX_MOVES_PER_DAY - uiState.movesUsed);
     movesLeftEl.textContent = String(movesLeft);
-
-    const actionsLeft = Math.max(0, MAX_ACTIONS_PER_DAY - (uiState.actionsUsed || 0));
-    if(actionsLeftEl) actionsLeftEl.textContent = String(actionsLeft);
     if(movesLeftEl2) movesLeftEl2.textContent = String(movesLeft);
 
     // Panel state toggles
@@ -1961,19 +1951,13 @@ function renderGame(){
     }
   }
 
-  function afterPlayerActionCommit(){
-    uiState.actionsUsed = Number(uiState.actionsUsed || 0) + 1;
-    // Only allow movement after 2 committed actions.
-    uiState.phase = (uiState.actionsUsed >= MAX_ACTIONS_PER_DAY) ? "explore" : "needs_action";
-  }
-
   // Action buttons (commit immediately)
   btnDefend.onclick = () => {
     if(!world) return;
     const { nextWorld, events } = commitPlayerAction(world, { kind:"DEFEND" });
     world = nextWorld;
     uiState.dayEvents.push(...events);
-    afterPlayerActionCommit();
+    uiState.phase = "explore";
     saveToLocal(world);
     sync();
     openResultDialog(events);
@@ -1985,7 +1969,7 @@ function renderGame(){
     const { nextWorld, events } = commitPlayerAction(world, { kind });
     world = nextWorld;
     uiState.dayEvents.push(...events);
-    afterPlayerActionCommit();
+    uiState.phase = "explore";
     saveToLocal(world);
     sync();
     if(shouldShowActionResult(kind, events)) openResultDialog(events);
@@ -2002,7 +1986,7 @@ function renderGame(){
     const { nextWorld, events } = commitPlayerAction(world, { kind:"DRINK" });
     world = nextWorld;
     uiState.dayEvents.push(...events);
-    afterPlayerActionCommit();
+    uiState.phase = "explore";
     saveToLocal(world);
     sync();
     openResultDialog(events);
@@ -2014,7 +1998,7 @@ function renderGame(){
       const { nextWorld, events } = commitPlayerAction(world, { kind:"SET_TRAP", trapDefId:"net" });
       world = nextWorld;
       uiState.dayEvents.push(...events);
-      afterPlayerActionCommit();
+      uiState.phase = "explore";
       saveToLocal(world);
       sync();
       openResultDialog(events);
@@ -2027,7 +2011,7 @@ function renderGame(){
       const { nextWorld, events } = commitPlayerAction(world, { kind:"SET_TRAP", trapDefId:"mine" });
       world = nextWorld;
       uiState.dayEvents.push(...events);
-      afterPlayerActionCommit();
+      uiState.phase = "explore";
       saveToLocal(world);
       sync();
       openResultDialog(events);
@@ -2041,7 +2025,7 @@ function renderGame(){
       world = nextWorld;
       uiState.dayEvents.push(...events);
       // Cutting the net counts as your action for the day.
-      afterPlayerActionCommit();
+      uiState.phase = "explore";
       saveToLocal(world);
       sync();
       openResultDialog(events);
@@ -2057,7 +2041,7 @@ function renderGame(){
     const { nextWorld, events } = commitPlayerAction(world, { kind:"COLLECT", itemIndex: uiState.selectedGroundIndex });
     world = nextWorld;
     uiState.dayEvents.push(...events);
-    afterPlayerActionCommit();
+    uiState.phase = "explore";
     saveToLocal(world);
     sync();
     openResultDialog(events);
@@ -2072,7 +2056,7 @@ function renderGame(){
     const { nextWorld, events } = commitPlayerAction(world, { kind:"ATTACK", targetId: uiState.selectedTarget });
     world = nextWorld;
     uiState.dayEvents.push(...events);
-    afterPlayerActionCommit();
+    uiState.phase = "explore";
     saveToLocal(world);
     sync();
     openResultDialog(events);
@@ -2101,12 +2085,12 @@ function renderGame(){
   document.getElementById("debugAdvance").onclick = () => {
     if(!world) return;
 
-    // If user hasn't committed enough actions yet, auto-commit NOTHING for testing.
-    while(uiState.phase === "needs_action" && Number(uiState.actionsUsed || 0) < MAX_ACTIONS_PER_DAY){
+    // If user hasn't committed an action yet, auto-commit NOTHING for testing.
+    if(uiState.phase === "needs_action"){
       const { nextWorld, events } = commitPlayerAction(world, { kind:"NOTHING" });
       world = nextWorld;
       uiState.dayEvents.push(...events);
-      afterPlayerActionCommit();
+      uiState.phase = "explore";
     }
 
     const intents = generateNpcIntents(world);

@@ -405,6 +405,28 @@ function getEquippedWeapon(entity){
   return { def, inst };
 }
 
+function equippedWeaponDamage(entity, { forDispute = false } = {}){
+  const w = getEquippedWeapon(entity);
+  if(!w) return 0;
+  const res = computeWeaponDamage(w.def, w.inst.qty, null, null, { forDispute });
+  return Number(res?.dmg || 0);
+}
+
+function ensureBestWeaponEquipped(entity, { forDispute = false } = {}){
+  // Auto-equip the strongest weapon currently in inventory.
+  // This is primarily for NPCs so they don't keep attacking with fists.
+  if(!entity?.inventory) return;
+  entity.inventory.equipped = entity.inventory.equipped || {};
+
+  const best = strongestWeaponInInventory(entity.inventory, { forDispute });
+  if(!best?.def?.id) return;
+
+  const curDmg = equippedWeaponDamage(entity, { forDispute });
+  if(best.dmg > curDmg){
+    entity.inventory.equipped.weaponDefId = best.def.id;
+  }
+}
+
 function getWeaponForAttack(entity, { prefer = "equipped", forDispute = false } = {}){
   // prefer:
   //  - "equipped": use currently equipped
@@ -1834,6 +1856,13 @@ export function endDay(world, npcIntents = [], dayEvents = []){
     e._today = {};
   }
 
+  // NPCs: always try to keep the strongest weapon equipped.
+  // This avoids cases where an NPC holds weapons in inventory but attacks with fists.
+  for(const npc of Object.values(next.entities.npcs || {})){
+    if(!npc || (npc.hp ?? 0) <= 0) continue;
+    ensureBestWeaponEquipped(npc);
+  }
+
   // --- NPC posture intents (ATTACK/DEFEND/NOTHING/DRINK/SET_TRAP) ---
   // We resolve posture before movement. Attacks are simultaneous; counter-attack only occurs
   // if the target also attacked the attacker on the same day.
@@ -1899,6 +1928,8 @@ export function endDay(world, npcIntents = [], dayEvents = []){
     }
 
     if(act.type === "ATTACK"){
+      // Make sure NPC uses their strongest available weapon.
+      ensureBestWeaponEquipped(a);
       if(!canAttackWithFp(a)){
         events.push({ type:"ATTACK", who: a.id, target: act.payload?.targetId, areaId: a.areaId, ok:false, reason:"too_tired" });
         continue;
