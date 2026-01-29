@@ -565,18 +565,15 @@ function decideSecondAction(world, npc, obs, traits, firstAction, { seed, day, a
 
     if(!targets.length) return null;
 
-    // Prefer the player slightly, then weakest HP, then most kills, then deterministic jitter.
+    // Target selection: prefer high-threat opponents (most kills), then weakest HP, then deterministic jitter.
+    // This avoids all NPCs hard-focusing the player when crowded.
     targets.sort((a,b)=>{
-      const ap = (a.id === "player") ? 1 : 0;
-      const bp = (b.id === "player") ? 1 : 0;
-      if(ap !== bp) return bp - ap;
-      if(a.hp !== b.hp) return a.hp - b.hp;
       if(a.kills !== b.kills) return b.kills - a.kills;
+      if(a.hp !== b.hp) return a.hp - b.hp;
       const aj = hash01(seed, day, `atk2_jit|${npc.id}|${a.id}`);
       const bj = hash01(seed, day, `atk2_jit|${npc.id}|${b.id}`);
       return bj - aj;
     });
-
     return targets[0].id;
   }
 
